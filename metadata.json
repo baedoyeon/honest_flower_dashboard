@@ -1,0 +1,8 @@
+{
+  "name": "어니스트플라워 위클리 후기 모니터링",
+  "description": "어니스트플라워의 위클리 사진 후기 분석 및 VOC 카테고리별 분석, 제품 만족도 통계를 제공하는 전사 모니터링 대시보드입니다.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
