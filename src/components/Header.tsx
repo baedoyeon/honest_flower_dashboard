@@ -1,4 +1,4 @@
-import { ClipboardCheck, Calendar, FileText } from "lucide-react";
+import { ClipboardCheck, Calendar, FileText, RefreshCw, Cloud, AlertCircle } from "lucide-react";
 import { useReviews } from "../context/ReviewsContext";
 
 // Helper: Get current date in KST (YYYY.MM.DD)
@@ -13,7 +13,7 @@ function getKSTDateString(): string {
 }
 
 export default function Header() {
-  const { weeklyReviews, reviews } = useReviews();
+  const { weeklyReviews, isUsingLocalData, refreshData, isSyncing } = useReviews();
   const todayStr = getKSTDateString();
 
   return (
@@ -43,7 +43,31 @@ export default function Header() {
             </div>
           </div>
 
-          <div className="flex items-center gap-4 text-xs font-medium text-slate-500">
+          <div className="flex flex-wrap items-center gap-3 text-xs font-medium text-slate-500">
+            {/* Firebase connection status badge */}
+            {isUsingLocalData ? (
+              <span className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-50 text-amber-700 border border-amber-200 rounded-2xl font-bold">
+                <AlertCircle className="h-3.5 w-3.5 text-amber-600 animate-pulse" />
+                로컬 데이터뷰 (임시)
+              </span>
+            ) : (
+              <span className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-2xl font-bold">
+                <Cloud className="h-3.5 w-3.5 text-emerald-600" />
+                파이어베이스 실시간 연동 중
+              </span>
+            )}
+
+            {/* Manual refresh button */}
+            <button
+              onClick={() => refreshData()}
+              disabled={isSyncing}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-2xl font-bold shadow-xs transition duration-200 cursor-pointer disabled:opacity-50"
+              title="파이어베이스에서 최신 데이터를 새로 가져옵니다."
+            >
+              <RefreshCw className={`h-3.5 w-3.5 text-slate-500 ${isSyncing ? "animate-spin text-blue-600" : ""}`} />
+              데이터 새로고침
+            </button>
+
             <span className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 border border-slate-100 rounded-2xl">
               <Calendar className="h-3.5 w-3.5 text-slate-400" /> 
               {todayStr} 기준

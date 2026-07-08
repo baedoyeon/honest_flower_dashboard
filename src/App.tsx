@@ -17,8 +17,7 @@ export default function App() {
 }
 
 function AppContent() {
-  const [activeTab, setActiveTab] = useState<"metrics" | "products" | "voc" | "archive">("metrics");
-  const { weekFilter, setWeekFilter, weekRanges } = useReviews();
+  const { weekFilter, setWeekFilter, weekRanges, activeTab, setActiveTab } = useReviews();
 
   const tabs = [
     { id: "metrics", label: "주간 핵심 지표", icon: <BarChart2 className="h-4 w-4" /> },
@@ -30,7 +29,7 @@ function AppContent() {
   const filterOptions = [
     { id: "this", label: weekRanges.thisWeek.label },
     { id: "last", label: weekRanges.lastWeek.label },
-    { id: "all", label: "전체 기간 (Active)" },
+    { id: "all", label: "전체 기간 (금주+전주 합산)" },
   ] as const;
 
   return (

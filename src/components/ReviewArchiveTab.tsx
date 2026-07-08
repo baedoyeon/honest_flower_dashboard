@@ -655,7 +655,7 @@ export default function ReviewArchiveTab() {
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="border-b border-slate-100 bg-slate-50/75 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-                  <th className="py-3 px-4 text-center w-16">번호</th>
+                  <th className="py-3 px-4 text-center w-24">리뷰어</th>
                   <th className="py-3 px-3 w-20">구분</th>
                   <th className="py-3 px-3 w-24">날짜</th>
                   <th className="py-3 px-4 w-48">상품명</th>
@@ -688,8 +688,8 @@ export default function ReviewArchiveTab() {
                         onClick={() => setExpandedReviewId(isExpanded ? null : item.id)}
                         className={`hover:bg-slate-50/50 transition cursor-pointer select-none ${isExpanded ? "bg-blue-50/10" : ""}`}
                       >
-                        <td className="py-3.5 px-4 text-center text-xs font-bold text-slate-400">
-                          #{item.id}
+                        <td className="py-3.5 px-4 text-center text-xs font-bold text-slate-700">
+                          {item.reviewer || `고객#${item.id}`}
                         </td>
                         <td className="py-3.5 px-3">
                           <div className="flex flex-col gap-1 items-start">
@@ -748,7 +748,9 @@ export default function ReviewArchiveTab() {
                             >
                               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                                 <div className="flex items-center gap-2">
-                                  <span className="text-xs font-bold text-slate-400">리뷰 상세 정보</span>
+                                  <span className="text-xs font-bold text-slate-400">리뷰 상세 정보 (ID: #{item.id})</span>
+                                  <div className="h-3 w-px bg-slate-200" />
+                                  <span className="text-xs font-bold text-slate-700">{item.reviewer || "익명"}</span>
                                   <div className="h-3 w-px bg-slate-200" />
                                   <span className="text-xs font-semibold text-slate-700">{item.product}</span>
                                 </div>
@@ -812,7 +814,8 @@ export default function ReviewArchiveTab() {
                   >
                     <div className="space-y-1 min-w-0">
                       <div className="flex items-center gap-2">
-                        <span className="text-[10px] font-bold text-slate-400">#{item.id}</span>
+                        <span className="text-[10px] font-bold text-slate-700">{item.reviewer || `고객#${item.id}`}</span>
+                        <span className="text-[10px] text-slate-400">|</span>
                         <span className="text-[10px] text-slate-400">{item.date}</span>
                       </div>
                       <h4 className="text-xs font-bold text-slate-800 truncate">{item.product}</h4>

@@ -13,6 +13,7 @@ export interface Review {
   department: string;
   review: string;
   archived?: boolean;
+  reviewer?: string;
 }
 
 export interface ProductStat {
@@ -1088,13 +1089,13 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 107,
-    "date": "2026.06.22",
-    "product": "자리공",
-    "rating": 5,
-    "type": "추천",
+    "date": "2026.07.01",
+    "product": "플라워 럭키박스",
+    "rating": 3,
+    "type": "비추천",
     "category": "품질/상태",
     "department": "SCM & MD",
-    "review": "처음보는 거라 구매새 봤어요 특이하게 분위기 좋아요"
+    "review": "오픈하는데 잎이 우수우 떨어지네요 그건 뭐 어쩔수 없다하더라도... 홈페이지 홍보 사진과 풍성함이 다른것 같아요 한번더 받아보고 또 실망감이 든다면 재주문은 안할것 같아요"
   },
   {
     "id": 108,
@@ -1108,13 +1109,13 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 109,
-    "date": "2026.06.22",
-    "product": "쁘띠 수국",
-    "rating": 5,
-    "type": "추천",
+    "date": "2026.07.01",
+    "product": "프릴 리시안셔스",
+    "rating": 3,
+    "type": "비추천",
     "category": "품질/상태",
     "department": "SCM & MD",
-    "review": "여름시원한느낌♡예뻐요"
+    "review": "꽃 들이 많이 떨어져 있어서 아쉬웠어요ㅠㅠ"
   },
   {
     "id": 110,
@@ -1328,13 +1329,13 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 131,
-    "date": "2026.06.20",
-    "product": "플로픽 비비드",
-    "rating": 5,
-    "type": "추천",
-    "category": "상품구성/양",
+    "date": "2026.06.30",
+    "product": "7월 플로리스트픽 내추럴",
+    "rating": 3,
+    "type": "비추천",
+    "category": "품질/상태",
     "department": "SCM & MD",
-    "review": "꽃이 싱싱하기도 하지만 실제 색싱은 사진으로 봤을 때보다 더 예쁘네요. 불루 계열 꽃 좋아하지 않았지만 이 조합은 정말 예뻐요. 위 그림의 바디와 색상이 잘 어울릴 것 같아서 구매했는데 아주 좋아요. 이 화병에 다 꽂기애는 많아서 다른 화병에도 나눠 꽂았어요."
+    "review": "3번째배송인데 지난번은 누락배송 이번엔 마지막사진처럼 꽃들을 고정하는장치로 고정하지않아 카네이션 머리가 부러져왔어요. 몇송이 안되는 꽃중 한놈이 망가져배송. ㅠ히야신스는 저렇게 짧뚱하게 보내와서 맨마지막 놈은 화병에 갇혀버리고...얼마전 해바라기도 시들어오더니 속상하네요. 아니 화가나요. 꽃구성은 첫번째사진처람 이뻐요. 그나마 대가리 부러진걸 대표사진으로안한건 예의사밉니다"
   },
   {
     "id": 132,
@@ -1968,13 +1969,13 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 195,
-    "date": "2026.06.18",
-    "product": "엔카이셔스",
-    "rating": 5,
-    "type": "추천",
-    "category": "품질/상태",
-    "department": "SCM & MD",
-    "review": "신선한 상태로 잘 받았어요. 여름의 싱그러움 그대로인듯해요. 만족도 100퍼 입니다."
+    "date": "2026.06.28",
+    "product": "테디베어 해바라기",
+    "rating": 3,
+    "type": "비추천",
+    "category": "배송/포장",
+    "department": "SCM & CS",
+    "review": "저번에 동글동글 예쁜 아이들로 와서 또 주문했는데 이번엔….🫠 그리고 배송도 너무 아쉬웠어요ㅠㅠ 꽃 중 하나는 아예 안 꽂혀 있었어요"
   },
   {
     "id": 196,

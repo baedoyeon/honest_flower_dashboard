@@ -1,11 +1,17 @@
 import { useState, useMemo } from "react";
 import { ProductStat } from "../data/classifiedReviews";
-import { AlertTriangle, TrendingDown, CheckCircle2, Search, ArrowUpDown, Flame, HelpCircle } from "lucide-react";
-import { motion } from "motion/react";
+import { AlertTriangle, TrendingDown, CheckCircle2, Search, ArrowUpDown, Flame, HelpCircle, Star, X, MessageSquare } from "lucide-react";
+import { motion, AnimatePresence } from "motion/react";
 import { useReviews } from "../context/ReviewsContext";
 
 export default function ProductStatusTab() {
-  const { weeklyReviews: reviewsData, productStats: productStatsData } = useReviews();
+  const { 
+    weeklyReviews: reviewsData, 
+    productStats: productStatsData,
+    setActiveTab,
+    setMetricsProductFilter,
+    setMetricsTypeFilter
+  } = useReviews();
   
   const [searchTerm, setSearchTerm] = useState("");
   const [sortField, setSortField] = useState<keyof ProductStat>("totalCount");
@@ -146,7 +152,18 @@ export default function ProductStatusTab() {
                 </div>
                 <div>
                   <p className="text-[9px] text-slate-400 font-bold uppercase">비추천</p>
-                  <p className="text-xs font-black text-red-600">{p.notRecommend}건</p>
+                  <button 
+                    onClick={() => {
+                      if (p.notRecommend > 0) {
+                        setMetricsProductFilter(p.title);
+                        setMetricsTypeFilter("비추천");
+                        setActiveTab("metrics");
+                      }
+                    }}
+                    className={`text-xs font-black text-red-600 hover:underline cursor-pointer focus:outline-hidden ${p.notRecommend > 0 ? "" : "opacity-30 pointer-events-none"}`}
+                  >
+                    {p.notRecommend}건
+                  </button>
                 </div>
               </div>
             </div>
@@ -201,6 +218,15 @@ export default function ProductStatusTab() {
                 >
                   <div className="flex items-center justify-center gap-1">
                     추천 <ArrowUpDown className="h-3 w-3" />
+                  </div>
+                </th>
+                <th 
+                  scope="col" 
+                  onClick={() => handleSort("neutral")}
+                  className="px-4 py-3.5 text-center text-xs font-semibold text-slate-500 uppercase tracking-wider cursor-pointer hover:bg-slate-100 transition"
+                >
+                  <div className="flex items-center justify-center gap-1">
+                    중립 <ArrowUpDown className="h-3 w-3" />
                   </div>
                 </th>
                 <th 
@@ -262,10 +288,58 @@ export default function ProductStatusTab() {
                         {item.totalCount}건
                       </td>
                       <td className="whitespace-nowrap px-4 py-4 text-center text-xs text-blue-600 font-semibold">
-                        {item.recommend}건
+                        <button
+                          onClick={() => {
+                            if (item.recommend > 0) {
+                              setMetricsProductFilter(item.product);
+                              setMetricsTypeFilter("추천");
+                              setActiveTab("metrics");
+                            }
+                          }}
+                          className={`px-2 py-1 rounded-md transition-all ${
+                            item.recommend > 0 
+                              ? "hover:bg-blue-50 hover:underline cursor-pointer text-blue-600 font-bold animate-pulse-subtle" 
+                              : "text-slate-300 pointer-events-none"
+                          }`}
+                        >
+                          {item.recommend}건
+                        </button>
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-4 text-center text-xs text-amber-600 font-semibold">
+                        <button
+                          onClick={() => {
+                            if (item.neutral > 0) {
+                              setMetricsProductFilter(item.product);
+                              setMetricsTypeFilter("중립");
+                              setActiveTab("metrics");
+                            }
+                          }}
+                          className={`px-2 py-1 rounded-md transition-all ${
+                            item.neutral > 0 
+                              ? "hover:bg-amber-50 hover:underline cursor-pointer text-amber-600 font-bold" 
+                              : "text-slate-300 pointer-events-none"
+                          }`}
+                        >
+                          {item.neutral}건
+                        </button>
                       </td>
                       <td className="whitespace-nowrap px-4 py-4 text-center text-xs text-rose-500 font-semibold">
-                        {item.notRecommend}건
+                        <button
+                          onClick={() => {
+                            if (item.notRecommend > 0) {
+                              setMetricsProductFilter(item.product);
+                              setMetricsTypeFilter("비추천");
+                              setActiveTab("metrics");
+                            }
+                          }}
+                          className={`px-2 py-1 rounded-md transition-all ${
+                            item.notRecommend > 0 
+                              ? "hover:bg-rose-50 hover:underline cursor-pointer text-rose-600 font-bold" 
+                              : "text-slate-300 pointer-events-none"
+                          }`}
+                        >
+                          {item.notRecommend}건
+                        </button>
                       </td>
                       <td className="whitespace-nowrap px-4 py-4 text-center">
                         <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${
@@ -286,7 +360,7 @@ export default function ProductStatusTab() {
                 })
               ) : (
                 <tr>
-                  <td colSpan={6} className="px-6 py-12 text-center text-xs text-slate-400">
+                  <td colSpan={7} className="px-6 py-12 text-center text-xs text-slate-400">
                     검색 결과에 일치하는 상품이 없습니다.
                   </td>
                 </tr>

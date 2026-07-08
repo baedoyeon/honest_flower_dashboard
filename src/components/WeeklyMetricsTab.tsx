@@ -1,13 +1,31 @@
 import { BarChart, Bar, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, LabelList } from "recharts";
-import { ArrowDownRight, ArrowUpRight, MessageSquare, AlertTriangle, Lightbulb, Users, BarChart2, Star, Search, Sparkles, ThumbsUp } from "lucide-react";
+import { ArrowDownRight, ArrowUpRight, MessageSquare, AlertTriangle, Lightbulb, Users, BarChart2, Star, Search, Sparkles, ThumbsUp, X, Sprout } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { useReviews } from "../context/ReviewsContext";
 import { useState, useMemo } from "react";
 
 export default function WeeklyMetricsTab() {
-  const { weeklyReviews: reviewsData, archiveActiveReviews, isSyncing, isUsingLocalData } = useReviews();
+  const { 
+    weeklyReviews: allWeeklyReviews, 
+    archiveActiveReviews, 
+    isSyncing, 
+    isUsingLocalData,
+    metricsProductFilter,
+    setMetricsProductFilter,
+    metricsTypeFilter: selectedCardFilter,
+    setMetricsTypeFilter: setSelectedCardFilter
+  } = useReviews();
 
-  const [selectedCardFilter, setSelectedCardFilter] = useState<"all" | "추천" | "중립" | "비추천">("all");
+  const reviewsData = useMemo(() => {
+    if (!metricsProductFilter) return allWeeklyReviews;
+    const pLower = metricsProductFilter.toLowerCase();
+    return allWeeklyReviews.filter(r => 
+      r.product.toLowerCase() === pLower ||
+      r.product.toLowerCase().includes(pLower) ||
+      pLower.includes(r.product.toLowerCase())
+    );
+  }, [allWeeklyReviews, metricsProductFilter]);
+
   const [searchQuery, setSearchQuery] = useState("");
   const [visibleCount, setVisibleCount] = useState(5);
 
@@ -111,6 +129,35 @@ export default function WeeklyMetricsTab() {
       transition={{ duration: 0.4 }}
       className="space-y-6"
     >
+      {/* Active Product Filter Alert Banner */}
+      {metricsProductFilter && (
+        <div className="bg-blue-50 border border-blue-100 rounded-3xl p-5 shadow-xs flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="bg-blue-600 text-white rounded-2xl p-2.5 shadow-sm">
+              <Sprout className="h-5 w-5" />
+            </div>
+            <div>
+              <h3 className="text-sm font-black text-slate-800">
+                상품 상세 분석 모드: <span className="text-blue-600">{metricsProductFilter}</span>
+              </h3>
+              <p className="text-xs text-slate-500 font-semibold mt-0.5">
+                선택한 상품의 주간 핵심 지표, 누적 만족도 추이, 그리고 원본 피드백을 단독 조회 중입니다.
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => {
+              setMetricsProductFilter("");
+              setSelectedCardFilter("all");
+            }}
+            className="flex items-center gap-1.5 rounded-xl border border-blue-200 bg-white hover:bg-slate-50 text-slate-700 px-4 py-2.5 text-xs font-bold transition cursor-pointer"
+          >
+            <X className="h-3.5 w-3.5" />
+            <span>필터 전체 해제 (Reset Filter)</span>
+          </button>
+        </div>
+      )}
+
       {/* Action Header bar for Weekly Reset */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between bg-white rounded-3xl p-5 border border-slate-100 shadow-sm gap-4">
         <div>
@@ -463,8 +510,8 @@ export default function WeeklyMetricsTab() {
                         <span className={`text-[10px] font-black px-2.5 py-0.5 rounded-md border ${sentimentTheme.bg}`}>
                           {sentimentTheme.label}
                         </span>
-                        <span className="text-[10px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded font-bold font-mono">
-                          ID: #{r.id}
+                        <span className="text-[10px] bg-slate-100 text-slate-700 px-2.5 py-0.5 rounded-md font-bold">
+                          {r.reviewer || `고객#${r.id}`}
                         </span>
                         <span className="text-[11px] font-bold text-slate-800">
                           {r.product}
