@@ -80,47 +80,151 @@ export default function WeeklyMetricsTab() {
         r.category.toLowerCase().includes(q)
       );
     }
+
+    // Group reviews with the same reviewer and date consecutively
+    const groupRepresentatives = new Map<string, { maxId: number }>();
+    list.forEach(r => {
+      const reviewerName = r.reviewer || `고객#${r.id}`;
+      const groupKey = `${reviewerName}_${r.date}`;
+      const current = groupRepresentatives.get(groupKey);
+      if (!current) {
+        groupRepresentatives.set(groupKey, { maxId: Number(r.id) });
+      } else {
+        current.maxId = Math.max(current.maxId, Number(r.id));
+      }
+    });
+
+    list.sort((a, b) => {
+      const aReviewer = a.reviewer || `고객#${a.id}`;
+      const bReviewer = b.reviewer || `고객#${b.id}`;
+      const aGroupKey = `${aReviewer}_${a.date}`;
+      const bGroupKey = `${bReviewer}_${b.date}`;
+
+      if (aGroupKey === bGroupKey) {
+        return Number(b.id) - Number(a.id);
+      }
+
+      const aRep = groupRepresentatives.get(aGroupKey)!;
+      const bRep = groupRepresentatives.get(bGroupKey)!;
+      return bRep.maxId - aRep.maxId;
+    });
+
     return list;
   }, [reviewsData, selectedCardFilter, searchQuery]);
 
-  // Dynamic insights text based on the selected card filter
+  // Dynamic insights text based on the selected card filter and current reviewsData
   const activeInsight = useMemo(() => {
     switch (selectedCardFilter) {
-      case "추천":
+      case "추천": {
+        const positiveReviews = reviewsData.filter(r => r.type === "추천");
+        const total = positiveReviews.length;
+        if (total === 0) {
+          return {
+            title: "추천(Positive) 핵심 요인",
+            sub: "💡 추천 고객이 가장 매료되는 포인트는?",
+            boldText: "“현재 분석 데이터 내에 추천 피드백이 없습니다.”",
+            desc: "현재 적용된 필터 조건 하에 추천(만족) 피드백이 집계되지 않은 상태입니다.",
+            tip: "고객 만족도 증대를 위해 제품 패키징 개선 및 사후 관리 프로세스 강화 제안"
+          };
+        }
+        
+        const counts: Record<string, number> = {};
+        positiveReviews.forEach(r => {
+          counts[r.category] = (counts[r.category] || 0) + 1;
+        });
+        
+        const sortedCategories = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+        const topCategory = sortedCategories[0]?.[0] || "품질/상태";
+        const topCount = sortedCategories[0]?.[1] || 0;
+        const topPercent = total > 0 ? Math.round((topCount / total) * 100) : 0;
+        
+        const breakdownStr = sortedCategories.map(([cat, count]) => `${cat}(${Math.round((count / total) * 100)}%)`).join(", ");
+        
         return {
           title: "추천(Positive) 핵심 요인",
           sub: "💡 추천 고객이 가장 매료되는 포인트는?",
-          boldText: "“압도적인 싱싱함과 풍성한 꽃 구성의 시너지”",
-          desc: "고객들이 긍정적인 후기와 추천을 자발적으로 남기는 가장 큰 원동력은 수령 직후 느껴지는 꽃의 '신선도'와 기대 이상의 '풍성함'입니다. 특히 선물 수령자들의 감동 섞인 피드백이 강력한 바이럴로 작용하고 있습니다.",
-          tip: "선물용 패키징 디테일 강화 및 시그니처 꽃 구성 유지"
+          boldText: `“시각적 감동을 주는 '${topCategory}' (${topPercent}%)의 높은 기여도”`,
+          desc: `현재 추천 피드백을 분석한 결과, 고객들이 매료되는 요인은 ${breakdownStr} 순서로 나타납니다. 특히 '${topCategory}' 요인이 핵심 원동력으로 분석되며, 이를 표준 성공 사례로 매뉴얼화하여 상품 경쟁력을 한층 더 극대화할 수 있습니다.`,
+          tip: `${topCategory} 관련 성공적인 구성을 유지 및 강화하여 긍정적 바이럴 마케팅 지속`
         };
-      case "중립":
+      }
+      case "중립": {
+        const neutralReviews = reviewsData.filter(r => r.type === "중립");
+        const total = neutralReviews.length;
+        if (total === 0) {
+          return {
+            title: "중립(Neutral) 전환 요인",
+            sub: "💡 중립 고객을 추천 고객으로 만들려면?",
+            boldText: "“현재 분석 데이터 내에 중립 피드백이 없습니다.”",
+            desc: "현재 적용된 필터 조건 하에 중립 피드백이 집계되지 않은 상태입니다.",
+            tip: "고객 만족도 다변화 상시 모니터링 진행"
+          };
+        }
+        
+        const counts: Record<string, number> = {};
+        neutralReviews.forEach(r => {
+          counts[r.category] = (counts[r.category] || 0) + 1;
+        });
+        
+        const sortedCategories = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+        const topCategory = sortedCategories[0]?.[0] || "품질/상태";
+        const topCount = sortedCategories[0]?.[1] || 0;
+        const topPercent = total > 0 ? Math.round((topCount / total) * 100) : 0;
+        
+        const breakdownStr = sortedCategories.map(([cat, count]) => `${cat}(${Math.round((count / total) * 100)}%)`).join(", ");
+        
         return {
           title: "중립(Neutral) 전환 요인",
           sub: "💡 중립 고객을 추천 고객으로 만들려면?",
-          boldText: "“품질은 만족스러우나 세부 프로세스 보완 필요”",
-          desc: "중립적인 태도를 취하는 고객층은 대체로 꽃 자체에는 만족하나, 미흡한 배송 알림, 개화 시기 불일치(너무 안 피어서 도착했거나 이미 활짝 피어 있어 수명이 짧은 경우) 등 서비스적 디테일에서 아쉬움을 표하고 있습니다.",
-          tip: "배송 예정 알림 고도화 및 개화 조절 가이드 동봉"
+          boldText: `“아쉬움을 보완해야 할 '${topCategory}' (${topPercent}%) 개선 과제”`,
+          desc: `현재 중립 고객들의 피드백 요인 분포는 ${breakdownStr} 순서로 나타납니다. 대체적인 제품 만족도는 양호하나 '${topCategory}' 영역에서의 미흡함이 지적되고 있으며, 이 세부 원인들을 선제 조치하면 우수 추천(Promoter) 고객군으로 즉각 전향될 수 있습니다.`,
+          tip: `${topCategory} 피드백 내 구체적 아쉬움(개화 시기, 배송 알림 등)을 분석하여 맞춤 서비스 개선 조치`
         };
-      case "비추천":
+      }
+      case "비추천": {
+        const criticalReviews = reviewsData.filter(r => r.type === "비추천");
+        const total = criticalReviews.length;
+        if (total === 0) {
+          return {
+            title: "비추천(Critical) 긴급 조치 요인",
+            sub: "💡 비추천 후기가 경고하는 치명적인 위험?",
+            boldText: "“현재 분석 데이터 내에 비추천 피드백이 없습니다.”",
+            desc: "현재 적용된 필터 범위 내에서 비추천(불만족) 피드백이 발생하지 않아 청정하고 우수한 품질 관리 상태를 보여주고 있습니다.",
+            tip: "우수 품질 유지 관리를 위해 상시 품질 검수 루프 활성화"
+          };
+        }
+        
+        const counts: Record<string, number> = {};
+        criticalReviews.forEach(r => {
+          counts[r.category] = (counts[r.category] || 0) + 1;
+        });
+        
+        const sortedCategories = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+        const topCategory = sortedCategories[0]?.[0] || "품질/상태";
+        const topCount = sortedCategories[0]?.[1] || 0;
+        const topPercent = total > 0 ? Math.round((topCount / total) * 100) : 0;
+        
+        const breakdownStr = sortedCategories.map(([cat, count]) => `${cat}(${Math.round((count / total) * 100)}%)`).join(", ");
+        
         return {
           title: "비추천(Critical) 긴급 조치 요인",
           sub: "💡 비추천 후기가 경고하는 치명적인 위험?",
-          boldText: "“여름철 고온 배송 시듦 및 파손에 즉각 반응”",
-          desc: "비추천 의견은 80% 이상이 배송 중 파손(꽃대 부러짐, 화병 깨짐)이나 고온 노출로 인한 꽃잎 괴사에 집중됩니다. 불만을 즉시 해소하지 못하면 이들은 이탈할 뿐만 아니라 강력한 악성 루머를 형성할 위험이 있습니다.",
-          tip: "여름철 콜드체인 보강 및 파손 대비 즉각 교환제 활성화"
+          boldText: `“불만의 주된 요인은 '${topCategory}' (${topPercent}%)에 집중”`,
+          desc: `현재 비추천 피드백 데이터 분석 결과, VOC 불만 원인은 ${breakdownStr} 순서로 집중되어 발생하고 있습니다. 특히 '${topCategory}' 요인이 핵심 원인으로 나타나므로, 타 부서와의 긴밀한 원인 규명 및 즉시 보상제 등의 긴급 조치가 시급합니다.`,
+          tip: `${topCategory} 개선을 최우선 순위 과제로 상정하고 즉각적인 품질 보정제 가동`
         };
+      }
       case "all":
       default:
         return {
           title: "핵심 채널 인사이트",
-          sub: "💡 비추천 비율이 유독 높은 원인은 무엇인가요?",
-          boldText: "“불만 고객이 사진 후기를 더 적극적으로 남기는 경향”",
-          desc: "만족한 고객들은 가볍게 텍스트로 고마움을 표하거나 사진을 가끔 찍어 올리는 반면, 배송 중 파손, 대가 부러짐, 혹은 극심한 여름 시들음 등의 피해를 입은 고객은 보상 신청 및 시각적인 불만 증빙을 위해 사진 후기를 훨씬 더 높은 활성도로 적극 업로드합니다.",
-          tip: "여름 극성수기 대응 전략 수립 필요 (SCM / MD 공조)"
+          sub: "💡 사진 후기 채널이 가진 차별적 분석 가치는 무엇인가요?",
+          boldText: "“압도적인 추천 비율이 보여주는 시각적 만족과 투명한 품질 검증”",
+          desc: "사진 후기는 만족도가 높은 추천(Positive) 비중이 압도적으로 높습니다. 기대했던 만큼 화사하고 싱싱한 꽃을 받았을 때 이를 시각적으로 기록하고 자랑하려는 고객 심리가 강력하게 작용하기 때문입니다. 동시에, 소수의 비추천 사례에서는 실물 상태(시들음, 파손)를 고발하는 명확한 시각 증거 역할을 하므로, 시각적 만족과 품질 격차(Visual Gap)를 동시에 모니터링할 수 있는 가장 신뢰도 높은 채널입니다.",
+          tip: "우수 추천 사진을 상품 페이지 및 마케팅 소스로 적극 활용하고, 소수의 불만 사진은 즉각 품질 피드백 루프로 연계"
         };
     }
-  }, [selectedCardFilter]);
+  }, [selectedCardFilter, reviewsData]);
 
   return (
     <motion.div
@@ -494,28 +598,54 @@ export default function WeeklyMetricsTab() {
         ) : (
           <div className="space-y-4">
             <div className="grid grid-cols-1 gap-4">
-              {filteredReviews.slice(0, visibleCount).map((r) => {
+              {filteredReviews.slice(0, visibleCount).map((r, index, arr) => {
                 const sentimentTheme = 
                   r.type === "추천" ? { bg: "bg-blue-50 text-blue-700 border-blue-100", label: "추천" } :
                   r.type === "중립" ? { bg: "bg-amber-50 text-amber-700 border-amber-100", label: "중립" } :
                   { bg: "bg-red-50 text-red-700 border-red-100", label: "비추천" };
 
+                // Check if this review belongs to the same post (same reviewer & date) as the previous one
+                const prevItem = index > 0 ? arr[index - 1] : null;
+                const rReviewer = r.reviewer || `고객#${r.id}`;
+                const prevReviewer = prevItem ? (prevItem.reviewer || `고객#${prevItem.id}`) : null;
+                const isSamePostAsPrev = prevItem && (rReviewer === prevReviewer) && (r.date === prevItem.date);
+
                 return (
                   <div
                     key={r.id}
-                    className="border border-slate-100 bg-white hover:border-slate-200 hover:shadow-xs p-5 rounded-2xl flex flex-col md:flex-row gap-4 items-start justify-between transition-all duration-200"
+                    className={`border border-slate-100 bg-white hover:border-slate-200 hover:shadow-xs p-5 rounded-2xl flex flex-col md:flex-row gap-4 items-start justify-between transition-all duration-200 ${
+                      isSamePostAsPrev ? "border-l-4 border-l-blue-400 bg-blue-50/5/10 ml-2 md:ml-4" : ""
+                    }`}
                   >
                     <div className="space-y-2 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
                         <span className={`text-[10px] font-black px-2.5 py-0.5 rounded-md border ${sentimentTheme.bg}`}>
                           {sentimentTheme.label}
                         </span>
-                        <span className="text-[10px] bg-slate-100 text-slate-700 px-2.5 py-0.5 rounded-md font-bold">
-                          {r.reviewer || `고객#${r.id}`}
-                        </span>
+                        {isSamePostAsPrev ? (
+                          <span className="text-[10px] text-slate-400 font-bold bg-slate-50 border border-slate-100 px-2 py-0.5 rounded-md flex items-center gap-1">
+                            ↳ <span className="text-blue-600">위와 동일한 게시글</span>
+                          </span>
+                        ) : (
+                          <span className="text-[10px] bg-slate-100 text-slate-700 px-2.5 py-0.5 rounded-md font-bold">
+                            {r.reviewer ? `${r.reviewer}님의 후기` : `고객#${r.id}님의 후기`}
+                          </span>
+                        )}
                         <span className="text-[11px] font-bold text-slate-800">
                           {r.product}
                         </span>
+                        {r.image_url && (
+                          <a 
+                            href={r.image_url} 
+                            target="_blank" 
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center text-xs hover:scale-110 transition shrink-0"
+                            title="사진 후기 보기 (새 창)"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            📷
+                          </a>
+                        )}
                         <span className="text-[10px] text-slate-400 font-medium ml-auto md:ml-0">
                           수령일: {r.date}
                         </span>

@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from "react";
 import { Review } from "../data/classifiedReviews";
-import { Star, Filter, ArrowUpDown, RefreshCw, MessageSquare, ShieldCheck, HelpCircle, AlertOctagon, Calendar, ChevronDown, ChevronUp, Database, Plus, Check, Loader2 } from "lucide-react";
+import { Star, Filter, ArrowUpDown, RefreshCw, MessageSquare, ShieldCheck, HelpCircle, AlertOctagon, Calendar, ChevronDown, ChevronUp, Database, Plus, Check, Loader2, Download } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { useReviews } from "../context/ReviewsContext";
 
@@ -146,11 +146,64 @@ export default function ReviewArchiveTab() {
     }
 
     // 4. Sorting
+    // To keep reviews from the same post (same reviewer and same date) consecutive:
+    // First, let's identify the group representative values.
+    const groupRepresentatives = new Map<string, { maxId: number; minId: number; maxRating: number; minRating: number }>();
+    
+    list.forEach(r => {
+      const reviewerName = r.reviewer || `고객#${r.id}`;
+      const groupKey = `${reviewerName}_${r.date}`;
+      const current = groupRepresentatives.get(groupKey);
+      if (!current) {
+        groupRepresentatives.set(groupKey, {
+          maxId: Number(r.id),
+          minId: Number(r.id),
+          maxRating: r.rating,
+          minRating: r.rating
+        });
+      } else {
+        current.maxId = Math.max(current.maxId, Number(r.id));
+        current.minId = Math.min(current.minId, Number(r.id));
+        current.maxRating = Math.max(current.maxRating, r.rating);
+        current.minRating = Math.min(current.minRating, r.rating);
+      }
+    });
+
     list.sort((a, b) => {
-      if (sortBy === "id-desc") return b.id - a.id;
-      if (sortBy === "id-asc") return a.id - b.id;
-      if (sortBy === "rating-desc") return b.rating - a.rating;
-      if (sortBy === "rating-asc") return a.rating - b.rating;
+      const aReviewer = a.reviewer || `고객#${a.id}`;
+      const bReviewer = b.reviewer || `고객#${b.id}`;
+      const aGroupKey = `${aReviewer}_${a.date}`;
+      const bGroupKey = `${bReviewer}_${b.date}`;
+
+      // If they belong to the same group (same post), keep them together
+      if (aGroupKey === bGroupKey) {
+        // Within the same group, sort by ID descending to show newest product in post first
+        return Number(b.id) - Number(a.id);
+      }
+
+      // If they are in different groups, sort the groups themselves by their representative values
+      const aRep = groupRepresentatives.get(aGroupKey)!;
+      const bRep = groupRepresentatives.get(bGroupKey)!;
+
+      if (sortBy === "id-desc") {
+        return bRep.maxId - aRep.maxId;
+      }
+      if (sortBy === "id-asc") {
+        return aRep.minId - bRep.minId;
+      }
+      if (sortBy === "rating-desc") {
+        if (bRep.maxRating !== aRep.maxRating) {
+          return bRep.maxRating - aRep.maxRating;
+        }
+        return bRep.maxId - aRep.maxId; // Fallback to ID desc
+      }
+      if (sortBy === "rating-asc") {
+        if (aRep.minRating !== bRep.minRating) {
+          return aRep.minRating - bRep.minRating;
+        }
+        return aRep.minId - bRep.minId; // Fallback to ID asc
+      }
+
       return 0;
     });
 
@@ -178,6 +231,55 @@ export default function ReviewArchiveTab() {
     setSelectedDay("전체");
     setExpandedReviewId(null);
     setVisibleCount(12);
+  };
+
+  // Export current filtered reviews to CSV
+  const handleExportToCSV = () => {
+    const headers = ["id", "date", "reviewer", "product", "rating", "type", "category", "department", "review", "image_url"];
+    
+    const escapeCSV = (val: any) => {
+      if (val === null || val === undefined) return "";
+      const str = String(val);
+      // Double up any quotes, and wrap in double quotes if it has comma, quote, or newline
+      if (str.includes(",") || str.includes('"') || str.includes("\n") || str.includes("\r")) {
+        return `"${str.replace(/"/g, '""')}"`;
+      }
+      return str;
+    };
+
+    const csvRows = [headers.join(",")];
+
+    filteredAndSortedReviews.forEach(r => {
+      const resolvedReviewer = r.reviewer || `고객#${r.id}`;
+      const resolvedDept = r.category === "상품구성/양" ? "MD" : r.category === "서비스/시스템" ? "프로덕트" : r.department;
+      
+      const row = [
+        escapeCSV(r.id),
+        escapeCSV(r.date),
+        escapeCSV(resolvedReviewer),
+        escapeCSV(r.product),
+        escapeCSV(r.rating),
+        escapeCSV(r.type),
+        escapeCSV(r.category),
+        escapeCSV(resolvedDept),
+        escapeCSV(r.review),
+        escapeCSV(r.image_url || "")
+      ];
+      csvRows.push(row.join(","));
+    });
+
+    const csvContent = "\uFEFF" + csvRows.join("\r\n");
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+    link.setAttribute("download", `honestflower_reviews_export_${dateStr}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   };
 
   // Submit new review
@@ -513,6 +615,16 @@ export default function ReviewArchiveTab() {
             >
               <RefreshCw className="h-3 w-3" /> 필터 초기화
             </button>
+
+            {/* CSV Export Button */}
+            <button
+              onClick={handleExportToCSV}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-3.5 py-1.5 text-xs font-bold text-emerald-700 hover:bg-emerald-100 active:scale-95 transition cursor-pointer shadow-2xs"
+              title="현재 필터가 적용된 화면상의 리뷰 데이터를 CSV 파일로 내보냅니다."
+            >
+              <Download className="h-3.5 w-3.5 text-emerald-600" />
+              CSV로 내보내기
+            </button>
           </div>
         </div>
 
@@ -646,6 +758,9 @@ export default function ReviewArchiveTab() {
         <div className="flex items-center justify-between">
           <p className="text-xs text-slate-400">
             총 <strong className="text-slate-700">{filteredAndSortedReviews.length}</strong>건의 리뷰가 조건에 맞게 검색되었습니다.
+            <span className="ml-2 text-[10px] text-slate-400 font-medium bg-slate-50 border border-slate-100 px-2 py-0.5 rounded-md">
+              💡 동일한 후기(리뷰어+날짜)에서 등록된 상품평들은 자동으로 묶여 정렬됩니다.
+            </span>
           </p>
         </div>
 
@@ -655,7 +770,7 @@ export default function ReviewArchiveTab() {
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="border-b border-slate-100 bg-slate-50/75 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-                  <th className="py-3 px-4 text-center w-24">리뷰어</th>
+                  <th className="py-3 px-4 text-center w-36 bg-slate-100/30">리뷰어</th>
                   <th className="py-3 px-3 w-20">구분</th>
                   <th className="py-3 px-3 w-24">날짜</th>
                   <th className="py-3 px-4 w-48">상품명</th>
@@ -666,9 +781,15 @@ export default function ReviewArchiveTab() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {filteredAndSortedReviews.slice(0, visibleCount).map((item) => {
+                {filteredAndSortedReviews.slice(0, visibleCount).map((item, index, arr) => {
                   const isExpanded = expandedReviewId === item.id;
                   
+                  // Check if this review belongs to the same post (same reviewer & date) as the previous one
+                  const prevItem = index > 0 ? arr[index - 1] : null;
+                  const itemReviewer = item.reviewer || `고객#${item.id}`;
+                  const prevReviewer = prevItem ? (prevItem.reviewer || `고객#${prevItem.id}`) : null;
+                  const isSamePostAsPrev = prevItem && (itemReviewer === prevReviewer) && (item.date === prevItem.date);
+
                   let typeLabelColor = "bg-blue-50 text-blue-700 ring-blue-700/10";
                   let typeIcon = <ShieldCheck className="h-3 w-3 text-blue-600" />;
                   if (item.type === "중립") {
@@ -686,10 +807,32 @@ export default function ReviewArchiveTab() {
                       {/* Row */}
                       <tr 
                         onClick={() => setExpandedReviewId(isExpanded ? null : item.id)}
-                        className={`hover:bg-slate-50/50 transition cursor-pointer select-none ${isExpanded ? "bg-blue-50/10" : ""}`}
+                        className={`hover:bg-slate-50/50 transition cursor-pointer select-none ${isExpanded ? "bg-blue-50/10" : ""} ${isSamePostAsPrev ? "bg-slate-50/10" : ""}`}
                       >
-                        <td className="py-3.5 px-4 text-center text-xs font-bold text-slate-700">
-                          {item.reviewer || `고객#${item.id}`}
+                        <td className="py-3.5 px-4 text-center text-xs font-bold text-slate-700 border-r border-slate-50">
+                          {isSamePostAsPrev ? (
+                            <span className="text-[10px] text-slate-400 font-semibold italic flex items-center justify-center gap-1 bg-slate-50/30 py-1 rounded-md">
+                              ↳ <span className="opacity-70">위와 동일한 게시글</span>
+                            </span>
+                          ) : (
+                            <div className="flex items-center justify-center gap-1.5 flex-wrap">
+                              <span>
+                                {item.reviewer ? `${item.reviewer}님의 후기` : `고객#${item.id}님의 후기`}
+                              </span>
+                              {item.image_url && (
+                                <a 
+                                  href={item.image_url} 
+                                  target="_blank" 
+                                  rel="noopener noreferrer"
+                                  className="inline-flex items-center shrink-0 text-slate-500 hover:text-blue-600 transition hover:scale-110"
+                                  title="사진 후기 보기 (새 창)"
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  📷
+                                </a>
+                              )}
+                            </div>
+                          )}
                         </td>
                         <td className="py-3.5 px-3">
                           <div className="flex flex-col gap-1 items-start">
@@ -715,7 +858,21 @@ export default function ReviewArchiveTab() {
                           {item.product}
                         </td>
                         <td className="py-3.5 px-4 text-xs font-medium text-slate-600 max-w-sm truncate">
-                          {item.review}
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            {item.image_url && (
+                              <a 
+                                href={item.image_url} 
+                                target="_blank" 
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center shrink-0 text-slate-500 hover:text-blue-600 transition hover:scale-110"
+                                title="사진 후기 보기 (새 창)"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                📷
+                              </a>
+                            )}
+                            <span className="truncate">{item.review}</span>
+                          </div>
                         </td>
                         <td className="py-3.5 px-3">
                           <span className="inline-flex items-center rounded-md bg-slate-50 px-2 py-0.5 text-[10px] font-semibold text-slate-600 ring-1 ring-slate-600/10 ring-inset">
@@ -750,7 +907,23 @@ export default function ReviewArchiveTab() {
                                 <div className="flex items-center gap-2">
                                   <span className="text-xs font-bold text-slate-400">리뷰 상세 정보 (ID: #{item.id})</span>
                                   <div className="h-3 w-px bg-slate-200" />
-                                  <span className="text-xs font-bold text-slate-700">{item.reviewer || "익명"}</span>
+                                  <span className="text-xs font-bold text-slate-700">
+                                    {item.reviewer ? `${item.reviewer}님의 후기` : "익명 고객님의 후기"}
+                                  </span>
+                                  {item.image_url && (
+                                    <>
+                                      <div className="h-3 w-px bg-slate-200" />
+                                      <a 
+                                        href={item.image_url} 
+                                        target="_blank" 
+                                        rel="noopener noreferrer"
+                                        className="inline-flex items-center gap-1 text-xs font-bold text-blue-600 hover:text-blue-800 hover:underline"
+                                        title="사진 후기 보기 (새 창)"
+                                      >
+                                        📷 <span className="text-[11px] font-semibold">사진 후기</span>
+                                      </a>
+                                    </>
+                                  )}
                                   <div className="h-3 w-px bg-slate-200" />
                                   <span className="text-xs font-semibold text-slate-700">{item.product}</span>
                                 </div>
@@ -788,9 +961,15 @@ export default function ReviewArchiveTab() {
 
           {/* Mobile List View */}
           <div className="block md:hidden divide-y divide-slate-100">
-            {filteredAndSortedReviews.slice(0, visibleCount).map((item) => {
+            {filteredAndSortedReviews.slice(0, visibleCount).map((item, index, arr) => {
               const isExpanded = expandedReviewId === item.id;
               
+              // Check if this review belongs to the same post (same reviewer & date) as the previous one
+              const prevItem = index > 0 ? arr[index - 1] : null;
+              const itemReviewer = item.reviewer || `고객#${item.id}`;
+              const prevReviewer = prevItem ? (prevItem.reviewer || `고객#prevItem.id`) : null;
+              const isSamePostAsPrev = prevItem && (itemReviewer === prevReviewer) && (item.date === prevItem.date);
+
               let typeLabelColor = "bg-blue-50 text-blue-700 ring-blue-700/10";
               let typeIcon = <ShieldCheck className="h-3 w-3 text-blue-600" />;
               if (item.type === "중립") {
@@ -806,17 +985,42 @@ export default function ReviewArchiveTab() {
               return (
                 <div 
                   key={item.id} 
-                  className={`p-4 transition ${isExpanded ? "bg-blue-50/10" : "bg-white"}`}
+                  className={`p-4 transition ${isExpanded ? "bg-blue-50/10" : "bg-white"} ${isSamePostAsPrev ? "bg-slate-50/5" : ""}`}
                 >
                   <div 
                     onClick={() => setExpandedReviewId(isExpanded ? null : item.id)}
                     className="flex items-start justify-between gap-2 cursor-pointer select-none"
                   >
                     <div className="space-y-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="text-[10px] font-bold text-slate-700">{item.reviewer || `고객#${item.id}`}</span>
-                        <span className="text-[10px] text-slate-400">|</span>
-                        <span className="text-[10px] text-slate-400">{item.date}</span>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        {isSamePostAsPrev ? (
+                          <span className="text-[10px] text-slate-400 font-semibold italic">
+                            ↳ 위와 동일한 게시글 후기
+                          </span>
+                        ) : (
+                          <>
+                            <span className="text-[10px] font-bold text-slate-700">
+                              {item.reviewer ? `${item.reviewer}님의 후기` : `고객#${item.id}님의 후기`}
+                            </span>
+                            <span className="text-[10px] text-slate-400">|</span>
+                            <span className="text-[10px] text-slate-400">{item.date}</span>
+                            {item.image_url && (
+                              <>
+                                <span className="text-[10px] text-slate-400">|</span>
+                                <a 
+                                  href={item.image_url} 
+                                  target="_blank" 
+                                  rel="noopener noreferrer"
+                                  className="text-xs hover:scale-110 active:scale-95 transition inline-flex items-center shrink-0"
+                                  onClick={(e) => e.stopPropagation()}
+                                  title="사진 후기 보기 (새 창)"
+                                >
+                                  📷
+                                </a>
+                              </>
+                            )}
+                          </>
+                        )}
                       </div>
                       <h4 className="text-xs font-bold text-slate-800 truncate">{item.product}</h4>
                       <p className="text-xs text-slate-500 line-clamp-1">{item.review}</p>
@@ -831,7 +1035,7 @@ export default function ReviewArchiveTab() {
                           아카이브
                         </span>
                       ) : (
-                        <span className="inline-flex items-center text-[9px] text-green-600 font-bold bg-green-50 px-1.5 py-0.2 rounded-sm animate-pulse">
+                        <span className="inline-flex items-center text-[9px] text-green-600 font-bold bg-green-50 px-1.5 py-0.5 rounded-sm animate-pulse">
                           금주 집계중
                         </span>
                       )}
@@ -860,6 +1064,21 @@ export default function ReviewArchiveTab() {
                           &ldquo;{item.review}&rdquo;
                         </p>
                       </div>
+
+                      {item.image_url && (
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] text-slate-400 font-bold">첨부 이미지:</span>
+                          <a 
+                            href={item.image_url} 
+                            target="_blank" 
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 text-[11px] font-bold text-blue-600 hover:text-blue-800 hover:underline"
+                            title="사진 후기 보기 (새 창)"
+                          >
+                            📷 사진 링크 열기
+                          </a>
+                        </div>
+                      )}
 
                       <div className="flex flex-wrap gap-1.5">
                         <span className="inline-flex items-center rounded-md bg-slate-50 px-2 py-0.5 text-[10px] font-semibold text-slate-600 ring-1 ring-slate-600/10 ring-inset">

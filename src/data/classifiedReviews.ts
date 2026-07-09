@@ -14,6 +14,7 @@ export interface Review {
   review: string;
   archived?: boolean;
   reviewer?: string;
+  image_url?: string;
 }
 
 export interface ProductStat {

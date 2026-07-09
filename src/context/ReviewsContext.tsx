@@ -238,7 +238,9 @@ function parseFirestoreReview(docId: string, data: any, fallbackId: number): Rev
     };
   }
 
-  return {
+  const image_url = data.image_url || data.imageUrl || data.imageURL || "";
+
+  const parsedReview: Review = {
     id,
     date,
     product,
@@ -248,8 +250,13 @@ function parseFirestoreReview(docId: string, data: any, fallbackId: number): Rev
     department,
     review: reviewText,
     archived,
-    reviewer
+    reviewer,
+    image_url
   };
+
+  console.log(`[DEBUG] Parsed review ID ${id}:`, parsedReview);
+
+  return parsedReview;
 }
 
 export function ReviewsProvider({ children }: { children: React.ReactNode }) {
