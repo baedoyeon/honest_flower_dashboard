@@ -1,7 +1,7 @@
 import { BarChart, Bar, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, LabelList } from "recharts";
 import { ArrowDownRight, ArrowUpRight, MessageSquare, AlertTriangle, Lightbulb, Users, BarChart2, Star, Search, Sparkles, ThumbsUp, X, Sprout } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
-import { useReviews } from "../context/ReviewsContext";
+import { useReviews, getGroupKeysMap } from "../context/ReviewsContext";
 import { useState, useMemo } from "react";
 
 export default function WeeklyMetricsTab() {
@@ -15,6 +15,9 @@ export default function WeeklyMetricsTab() {
     metricsTypeFilter: selectedCardFilter,
     setMetricsTypeFilter: setSelectedCardFilter
   } = useReviews();
+
+  // Precompute group keys mapping for all weekly reviews using high-precision similarity logic
+  const groupKeysMap = useMemo(() => getGroupKeysMap(allWeeklyReviews), [allWeeklyReviews]);
 
   const reviewsData = useMemo(() => {
     if (!metricsProductFilter) return allWeeklyReviews;
@@ -81,11 +84,16 @@ export default function WeeklyMetricsTab() {
       );
     }
 
-    // Group reviews with the same reviewer and date consecutively
+    // Group reviews with the same reviewer, date, and highly similar content consecutively
     const groupRepresentatives = new Map<string, { maxId: number }>();
+    
+    // High-precision helper to get group key
+    const getGroupKey = (r: any) => {
+      return groupKeysMap.get(r.id) || `group_fallback_${r.id}`;
+    };
+
     list.forEach(r => {
-      const reviewerName = r.reviewer || `고객#${r.id}`;
-      const groupKey = `${reviewerName}_${r.date}`;
+      const groupKey = getGroupKey(r);
       const current = groupRepresentatives.get(groupKey);
       if (!current) {
         groupRepresentatives.set(groupKey, { maxId: Number(r.id) });
@@ -95,10 +103,8 @@ export default function WeeklyMetricsTab() {
     });
 
     list.sort((a, b) => {
-      const aReviewer = a.reviewer || `고객#${a.id}`;
-      const bReviewer = b.reviewer || `고객#${b.id}`;
-      const aGroupKey = `${aReviewer}_${a.date}`;
-      const bGroupKey = `${bReviewer}_${b.date}`;
+      const aGroupKey = getGroupKey(a);
+      const bGroupKey = getGroupKey(b);
 
       if (aGroupKey === bGroupKey) {
         return Number(b.id) - Number(a.id);
@@ -604,11 +610,9 @@ export default function WeeklyMetricsTab() {
                   r.type === "중립" ? { bg: "bg-amber-50 text-amber-700 border-amber-100", label: "중립" } :
                   { bg: "bg-red-50 text-red-700 border-red-100", label: "비추천" };
 
-                // Check if this review belongs to the same post (same reviewer & date) as the previous one
+                // Check if this review belongs to the same post (same reviewer, date, and highly similar content) as the previous one
                 const prevItem = index > 0 ? arr[index - 1] : null;
-                const rReviewer = r.reviewer || `고객#${r.id}`;
-                const prevReviewer = prevItem ? (prevItem.reviewer || `고객#${prevItem.id}`) : null;
-                const isSamePostAsPrev = prevItem && (rReviewer === prevReviewer) && (r.date === prevItem.date);
+                const isSamePostAsPrev = prevItem && groupKeysMap.get(r.id) === groupKeysMap.get(prevItem.id);
 
                 return (
                   <div
@@ -622,19 +626,34 @@ export default function WeeklyMetricsTab() {
                         <span className={`text-[10px] font-black px-2.5 py-0.5 rounded-md border ${sentimentTheme.bg}`}>
                           {sentimentTheme.label}
                         </span>
-                        {isSamePostAsPrev ? (
+                        <span className="text-[10px] bg-slate-100 text-slate-700 px-2.5 py-0.5 rounded-md font-bold">
+                          {r.reviewer ? `${r.reviewer}님의 후기` : `고객#${r.id}님의 후기`}
+                        </span>
+                        {isSamePostAsPrev && (
                           <span className="text-[10px] text-slate-400 font-bold bg-slate-50 border border-slate-100 px-2 py-0.5 rounded-md flex items-center gap-1">
                             ↳ <span className="text-blue-600">위와 동일한 게시글</span>
-                          </span>
-                        ) : (
-                          <span className="text-[10px] bg-slate-100 text-slate-700 px-2.5 py-0.5 rounded-md font-bold">
-                            {r.reviewer ? `${r.reviewer}님의 후기` : `고객#${r.id}님의 후기`}
                           </span>
                         )}
                         <span className="text-[11px] font-bold text-slate-800">
                           {r.product}
                         </span>
-                        {r.image_url && (
+                        {r.image_urls && r.image_urls.length > 0 ? (
+                          <div className="inline-flex gap-1 items-center flex-wrap">
+                            {r.image_urls.map((url, imgIdx) => (
+                              <a 
+                                key={imgIdx}
+                                href={url} 
+                                target="_blank" 
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center justify-center h-5 shrink-0 bg-slate-100 hover:bg-blue-50 text-slate-500 hover:text-blue-600 transition text-[10px] font-bold px-1 py-0.5 rounded border border-slate-200"
+                                title={`사진 후기 ${imgIdx + 1} 보기 (새 창)`}
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                📷 #{imgIdx + 1}
+                              </a>
+                            ))}
+                          </div>
+                        ) : r.image_url && (
                           <a 
                             href={r.image_url} 
                             target="_blank" 

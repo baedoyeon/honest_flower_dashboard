@@ -124,6 +124,75 @@ export function getMaskedName(id: number, rawName?: string): string {
   return MASKED_NAMES[id % MASKED_NAMES.length];
 }
 
+// Helper: Determine if two reviews belong to the same post (strictly same reviewer and same date)
+export function areReviewsSamePost(a: any, b: any): boolean {
+  if (!a || !b) return false;
+  
+  // Same reviewer (rawName or masked name)
+  const aReviewer = a.rawReviewer || a.reviewer || `고객#${a.id}`;
+  const bReviewer = b.rawReviewer || b.reviewer || `고객#${b.id}`;
+  if (aReviewer !== bReviewer) return false;
+
+  // Same date
+  if (a.date !== b.date) return false;
+
+  return true;
+}
+
+// Helper: Deduplicate reviews of the same product by the same person on the same day (duplicate photo uploads)
+export function getDeduplicatedReviews(list: Review[]): Review[] {
+  const merged: Review[] = [];
+  
+  list.forEach(item => {
+    const itemReviewer = item.rawReviewer || item.reviewer || `고객#${item.id}`;
+    
+    const existing = merged.find(m => {
+      const mReviewer = m.rawReviewer || m.reviewer || `고객#${m.id}`;
+      return (
+        mReviewer === itemReviewer &&
+        m.date === item.date &&
+        m.product === item.product &&
+        (m.review || "").trim() === (item.review || "").trim()
+      );
+    });
+    
+    if (existing) {
+      if (item.image_url) {
+        if (!existing.image_urls) {
+          existing.image_urls = existing.image_url ? [existing.image_url] : [];
+        }
+        if (!existing.image_urls.includes(item.image_url)) {
+          existing.image_urls.push(item.image_url);
+        }
+      }
+    } else {
+      merged.push({
+        ...item,
+        image_urls: item.image_url ? [item.image_url] : []
+      });
+    }
+  });
+  
+  return merged;
+}
+
+// Helper: Dynamically generate group keys for a list of reviews
+export function getGroupKeysMap(list: any[]): Map<number, string> {
+  const map = new Map<number, string>();
+  const representatives: any[] = [];
+
+  list.forEach(item => {
+    let matchedRep = representatives.find(rep => areReviewsSamePost(item, rep));
+    if (!matchedRep) {
+      representatives.push(item);
+      matchedRep = item;
+    }
+    map.set(item.id, `group_${matchedRep.id}`);
+  });
+
+  return map;
+}
+
 // Helper: Derive review type ("추천" | "중립" | "비추천") based on rating if missing
 function deriveReviewType(rating: number, existingType?: string): "추천" | "중립" | "비추천" {
   if (existingType === "추천" || existingType === "중립" || existingType === "비추천") {
@@ -192,7 +261,8 @@ function parseFirestoreReview(docId: string, data: any, fallbackId: number): Rev
       department: "SCM & MD",
       review: "꽃 들이 많이 떨어져 있어서 아쉬웠어요ㅠㅠ",
       archived: false,
-      reviewer: getMaskedName(id, "김*정")
+      reviewer: getMaskedName(id, "김*정"),
+      rawReviewer: "김*정"
     };
   }
   if (id === 107) {
@@ -206,7 +276,8 @@ function parseFirestoreReview(docId: string, data: any, fallbackId: number): Rev
       department: "SCM & MD",
       review: "오픈하는데 잎이 우수우 떨어지네요 그건 뭐 어쩔수 없다하더라도... 홈페이지 홍보 사진과 풍성함이 다른것 같아요 한번더 받아보고 또 실망감이 든다면 재주문은 안할것 같아요",
       archived: false,
-      reviewer: getMaskedName(id, "김*정")
+      reviewer: getMaskedName(id, "김*정"),
+      rawReviewer: "김*정"
     };
   }
   if (id === 131) {
@@ -218,9 +289,10 @@ function parseFirestoreReview(docId: string, data: any, fallbackId: number): Rev
       type: "비추천",
       category: "품질/상태",
       department: "SCM & MD",
-      review: "3번째배송인데 지난번은 누락배송 이번엔 마지막사진처럼 꽃들을 고정하는장치로 고정하지않아 카네이션 머리가 부러져왔어요. 몇송이 안되는 꽃중 한놈이 망가져배송. ㅠ히야신스는 저렇게 짧뚱하게 보내와서 맨마지막 놈은 화병에 갇혀버리고...얼마전 해바라기도 시들어오더니 속상하네요. 아니 화가나요. 꽃구성은 첫번째사진처람 이뻐요. 그나마 대가리 부러진걸 대표사진으로안한건 예의사밉니다",
+      review: "3번째배송인데 지난번은 누락배송 이번엔 마지막사진처럼 꽃들을 고정하는장치로 고정하지않아 카네이션 머리가 부러져왔어요. 몇송이 안되는 꽃중 한놈이 망가져배송. ㅠ히야신스는 저렇게 짧뚱하게 보내와서 맨마지막 놈은 화병에 갇혀버리고...얼마전 해바라기도 시들어오더니 속상하네요. 아니 화가나요. 꽃구성 첫번째사진처람 이뻐요. 그나마 대가리 부러진걸 대표사진으로안한건 예의사밉니다",
       archived: false,
-      reviewer: getMaskedName(id, "고객")
+      reviewer: getMaskedName(id, "고객"),
+      rawReviewer: "고객"
     };
   }
   if (id === 195) {
@@ -234,7 +306,8 @@ function parseFirestoreReview(docId: string, data: any, fallbackId: number): Rev
       department: "SCM & CS",
       review: "저번에 동글동글 예쁜 아이들로 와서 또 주문했는데 이번엔….🫠 그리고 배송도 너무 아쉬웠어요ㅠㅠ 꽃 중 하나는 아예 안 꽂혀 있었어요",
       archived: false,
-      reviewer: getMaskedName(id, "고객")
+      reviewer: getMaskedName(id, "고객"),
+      rawReviewer: "고객"
     };
   }
 
@@ -251,6 +324,7 @@ function parseFirestoreReview(docId: string, data: any, fallbackId: number): Rev
     review: reviewText,
     archived,
     reviewer,
+    rawReviewer,
     image_url
   };
 
@@ -259,13 +333,24 @@ function parseFirestoreReview(docId: string, data: any, fallbackId: number): Rev
   return parsedReview;
 }
 
-export function ReviewsProvider({ children }: { children: React.ReactNode }) {
-  const [reviews, setReviews] = useState<Review[]>(() =>
-    staticReviews.map(r => ({
+// Helper: Map static reviews to have rawReviewer and masked reviewer name
+const mapStaticReviews = (list: Review[]): Review[] => {
+  return list.map(r => {
+    const raw = r.rawReviewer || (r as any).reviewer || (r as any).writer || "";
+    return {
       ...r,
-      reviewer: r.reviewer || getMaskedName(r.id, (r as any).reviewer || (r as any).writer)
-    }))
-  );
+      rawReviewer: raw,
+      reviewer: r.reviewer || getMaskedName(r.id, raw)
+    };
+  });
+};
+
+export function ReviewsProvider({ children }: { children: React.ReactNode }) {
+  const [rawReviews, setRawReviews] = useState<Review[]>(() => mapStaticReviews(staticReviews));
+  
+  // Dynamically compute deduplicated and image-merged reviews list for all metrics and components
+  const reviews = useMemo(() => getDeduplicatedReviews(rawReviews), [rawReviews]);
+
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isFirestoreEmpty, setIsFirestoreEmpty] = useState<boolean>(false);
   const [isUsingLocalData, setIsUsingLocalData] = useState<boolean>(true);
@@ -323,7 +408,7 @@ export function ReviewsProvider({ children }: { children: React.ReactNode }) {
           console.log("Firestore reviews collection is empty. Falling back to local data.");
           setIsFirestoreEmpty(true);
           setIsUsingLocalData(true);
-          setReviews(staticReviews); // fallback
+          setRawReviews(mapStaticReviews(staticReviews)); // fallback
           setIsLoading(false);
         } else {
           const list: Review[] = [];
@@ -346,7 +431,7 @@ export function ReviewsProvider({ children }: { children: React.ReactNode }) {
             return b.id - a.id;
           });
           console.log("Loaded parsed reviews count:", list.length, "First few:", list.slice(0, 3));
-          setReviews(list);
+          setRawReviews(list);
           setIsFirestoreEmpty(false);
           setIsUsingLocalData(false);
           setIsLoading(false);
@@ -355,7 +440,7 @@ export function ReviewsProvider({ children }: { children: React.ReactNode }) {
       (error) => {
         console.error("Firestore loading error, falling back to local data:", error);
         setIsUsingLocalData(true);
-        setReviews(staticReviews);
+        setRawReviews(mapStaticReviews(staticReviews));
         setIsLoading(false);
       }
     );
@@ -452,7 +537,7 @@ export function ReviewsProvider({ children }: { children: React.ReactNode }) {
   const archiveActiveReviews = async () => {
     setIsSyncing(true);
     try {
-      const activeDocs = reviews.filter(r => r.archived !== true);
+      const activeDocs = rawReviews.filter(r => r.archived !== true);
       if (activeDocs.length === 0) {
         alert("현재 주간 대시보드에 활성화된 데이터가 없습니다.");
         return;
@@ -476,7 +561,7 @@ export function ReviewsProvider({ children }: { children: React.ReactNode }) {
   const addReview = async (newReview: Omit<Review, "id">) => {
     try {
       // Find maximum id to auto-increment
-      const maxId = reviews.length > 0 ? Math.max(...reviews.map(r => r.id)) : 0;
+      const maxId = rawReviews.length > 0 ? Math.max(...rawReviews.map(r => r.id)) : 0;
       const nextId = maxId + 1;
 
       const reviewDoc: Review = {
@@ -508,7 +593,7 @@ export function ReviewsProvider({ children }: { children: React.ReactNode }) {
       if (snapshot.empty) {
         setIsFirestoreEmpty(true);
         setIsUsingLocalData(true);
-        setReviews(staticReviews);
+        setRawReviews(mapStaticReviews(staticReviews));
       } else {
         const list: Review[] = [];
         let indexCounter = 10000;
@@ -528,7 +613,7 @@ export function ReviewsProvider({ children }: { children: React.ReactNode }) {
           }
           return b.id - a.id;
         });
-        setReviews(list);
+        setRawReviews(list);
         setIsFirestoreEmpty(false);
         setIsUsingLocalData(false);
       }

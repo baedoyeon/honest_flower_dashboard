@@ -18,45 +18,143 @@ export default function ProductStatusTab() {
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
 
 
-  // Aggregate stats for the 3 caution products dynamically based on reviews data
+  // Aggregate stats for the 3 caution products dynamically based on reviews data for the selected period
   const cautionProducts = useMemo(() => {
-    const targets = [
-      {
-        id: "luckybox",
-        title: "플라워 럭키박스",
-        keyword: "럭키박스",
-        tagline: "장미/리시안/수국 시들음 및 줄기 부러짐 발생",
-        desc: "여름철 고온 다습한 배송 과정에서 꽃들의 시들음 증상과 줄기 꺾임 현상이 많이 지적되었습니다. 특히 세트로 구성된 꽃들의 관상 기간이 단축되는 경향이 관찰되어 보랭재 보완 및 이동 시간 단축이 시급합니다."
-      },
-      {
-        id: "sunflower_mix",
-        title: "해바라기 에이드 믹스",
-        keyword: "해바라기 에이드 믹스",
-        tagline: "테디베어 해바라기 시들음 및 잎 마름",
-        desc: "여름 한정 패키지로 큰 인기를 끌고 있으나, 세부 구성인 '테디베어 해바라기'의 컨디션 저하(시들음, 썩음, 날파리 유입) 비율이 매우 높습니다. 특정 품종의 온도 민감도를 MD팀에서 재검토할 필요가 있습니다."
-      },
-      {
-        id: "phytolacca",
-        title: "자리공",
-        keyword: "자리공",
-        tagline: "배송 중 가지 꺾임 및 부러짐 집중 발생",
-        desc: "대가 굵고 늘어지는 성질이 있는 여름 열매 소재임에도 불구하고 배송 중 가지가 완전히 꺾이거나 으깨져서 도착한다는 후기가 속출했습니다. 완충 포장 방식 보완 혹은 포장 패키지 개선이 수반되어야 합니다."
+    // 1. Group reviews by product
+    const productGroups: Record<string, typeof reviewsData> = {};
+    reviewsData.forEach(r => {
+      if (!productGroups[r.product]) {
+        productGroups[r.product] = [];
       }
-    ];
+      productGroups[r.product].push(r);
+    });
 
-    return targets.map(target => {
-      const filteredReviews = reviewsData.filter(r => r.product.includes(target.keyword));
-      const total = filteredReviews.length;
-      const recommend = filteredReviews.filter(r => r.type === "추천").length;
-      const neutral = filteredReviews.filter(r => r.type === "중립").length;
-      const notRecommend = filteredReviews.filter(r => r.type === "비추천").length;
-      
-      const sumRating = filteredReviews.reduce((sum, r) => sum + r.rating, 0);
+    // 2. Calculate stats for each product
+    const stats = Object.entries(productGroups).map(([product, list]) => {
+      const total = list.length;
+      const recommend = list.filter(r => r.type === "추천").length;
+      const neutral = list.filter(r => r.type === "중립").length;
+      const notRecommend = list.filter(r => r.type === "비추천").length;
+      const sumRating = list.reduce((sum, r) => sum + r.rating, 0);
       const avgRating = total > 0 ? Math.round((sumRating / total) * 100) / 100 : 0;
       const recommendRate = total > 0 ? Math.round((recommend / total) * 100) : 0;
 
+      // Calculate a "Caution Score" to rank products by severity of quality issues
+      // Focus on: non-recommendations (highest weight), low rating, and neutral presence
+      const cautionScore = (notRecommend * 50) + (neutral * 10) + ((5 - avgRating) * 15) + (total * 0.1);
+
       return {
-        ...target,
+        product,
+        total,
+        recommend,
+        neutral,
+        notRecommend,
+        avgRating,
+        recommendRate,
+        cautionScore,
+        reviews: list
+      };
+    });
+
+    // 3. Filter to products with at least some neutral or negative signal OR are generally low rated (< 4.2)
+    const sortedStats = stats
+      .filter(s => s.notRecommend > 0 || s.neutral > 0 || s.avgRating < 4.2)
+      .sort((a, b) => b.cautionScore - a.cautionScore);
+
+    // If we have fewer than 3, we append other products sorted by lowest rating
+    const finalProducts = [...sortedStats];
+    if (finalProducts.length < 3) {
+      const remaining = stats
+        .filter(s => !finalProducts.some(fp => fp.product === s.product))
+        .sort((a, b) => a.avgRating - b.avgRating);
+      
+      for (const r of remaining) {
+        if (finalProducts.length >= 3) break;
+        finalProducts.push(r);
+      }
+    }
+
+    // Take top 3
+    const top3 = finalProducts.slice(0, 3);
+
+    // 4. Map them to caution card structure with dynamically generated tagline and description derived from reviews
+    return top3.map((item, idx) => {
+      const { product, total, recommend, neutral, notRecommend, avgRating, recommendRate, reviews: productReviews } = item;
+      
+      // Extract specific issues by analyzing review text keywords
+      const negativeReviews = productReviews.filter(r => r.type === "비추천" || r.type === "중립");
+      
+      let issues: string[] = [];
+      let hasWilt = false;
+      let hasBroken = false;
+      let hasPests = false;
+      let hasVolume = false;
+      let hasDelivery = false;
+
+      negativeReviews.forEach(r => {
+        const text = r.review;
+        if (/시들|시든|시들어|컨디션|상태|싱싱|생기/.test(text)) hasWilt = true;
+        if (/부러|꺾|으깨|상처|가지|머리|꺾임/.test(text)) hasBroken = true;
+        if (/벌레|날파리|모기|유입/.test(text)) hasPests = true;
+        if (/양|구성|풍성|부족|다름|홍보|작아|적음|적어/.test(text)) hasVolume = true;
+        if (/배송|포장|누락|지연|박스/.test(text)) hasDelivery = true;
+      });
+
+      if (hasWilt) issues.push("시들음/갈변");
+      if (hasBroken) issues.push("가지/줄기 꺾임");
+      if (hasPests) issues.push("날파리/해충 유입");
+      if (hasVolume) issues.push("풍성함 부족");
+      if (hasDelivery) issues.push("배송 지연/포장 손상");
+
+      // Default issue categories based on review category if text matching didn't yield anything
+      if (issues.length === 0 && negativeReviews.length > 0) {
+        const catCounts: Record<string, number> = {};
+        negativeReviews.forEach(r => {
+          catCounts[r.category] = (catCounts[r.category] || 0) + 1;
+        });
+        const topCat = Object.entries(catCounts).sort((a, b) => b[1] - a[1])[0]?.[0];
+        if (topCat) {
+          if (topCat === "품질/상태") issues.push("꽃 컨디션 저하");
+          else if (topCat === "배송/포장") issues.push("배송 중 컨디션 훼손");
+          else if (topCat === "상품구성/양") issues.push("구성품 부족 및 누락");
+          else issues.push("서비스 만족도 아쉬움");
+        }
+      }
+
+      // If there are still no issues (product is actually recommended but selected to fill 3 spots)
+      if (issues.length === 0) {
+        issues.push("안정적인 품질");
+      }
+
+      // Generate tagline
+      const issuesStr = issues.join(" 및 ");
+      const tagline = notRecommend > 0 
+        ? `${issuesStr} 불편 피드백 집중 발생`
+        : neutral > 0
+          ? `${issuesStr} 관련 아쉬움 제기`
+          : "전반적으로 우수한 평가를 유지 중";
+
+      // Find the most representative critical review for the description
+      const repReview = negativeReviews.find(r => r.review.length > 15)?.review || 
+                        negativeReviews[0]?.review || 
+                        productReviews[0]?.review || 
+                        "";
+      
+      // Generate description
+      let desc = "";
+      if (notRecommend > 0 || neutral > 0) {
+        const quotePart = repReview ? `\n\n실제 고객 후기: "${repReview.length > 80 ? repReview.slice(0, 80) + "..." : repReview}"` : "";
+        desc = `이번 분석 기간 중 '${product}' 상품에서 ${issuesStr} 관련 불만이 주로 접수되었습니다. 특히 여름철 고온 다습한 기후 변화에 따른 품질 관리와 완충 포장에 대한 피드백이 두드러집니다. 원인 규명 및 출고 전 검수 방식을 정비하고 즉각 조치할 필요가 있습니다.${quotePart}`;
+      } else {
+        desc = `'${product}' 상품은 이번 분석 기간 동안 비추천 피드백 없이 균일한 만족도를 기록하고 있습니다. 지속적인 사후 모니터링을 통해 우수한 퀄리티를 유지해 주세요.`;
+      }
+
+      return {
+        id: `dynamic_${idx}_${product.replace(/\s+/g, "_")}`,
+        title: product,
+        keyword: product,
+        tagline,
+        desc,
         total,
         recommend,
         neutral,
@@ -112,11 +210,15 @@ export default function ProductStatusTab() {
         <div className="flex items-center gap-2 mb-3">
           <Flame className="h-5 w-5 text-red-500" />
           <h3 className="text-lg font-bold text-slate-900">요주의 위크 핵심 케어 상품 (3종)</h3>
-          <span className="text-xs text-slate-400">비추천 집중 발생 및 특정 문제 반복 지적</span>
+          <span className="text-xs text-slate-400">선택한 기간 내 비추천 및 부정적 평가 기준 자동 산출</span>
         </div>
 
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-          {cautionProducts.map((p, idx) => (
+          {cautionProducts.length === 0 ? (
+            <div className="lg:col-span-3 bg-red-50/5 border border-red-100 rounded-3xl p-8 text-center">
+              <p className="text-xs font-bold text-slate-500">조회 범위 내 품질 경고 데이터가 발생하지 않았습니다.</p>
+            </div>
+          ) : cautionProducts.map((p, idx) => (
             <div 
               key={p.id}
               className="rounded-3xl border border-red-100 bg-red-50/10 p-6 shadow-sm flex flex-col justify-between hover:border-red-200 transition"

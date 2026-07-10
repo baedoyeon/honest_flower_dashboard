@@ -2,7 +2,7 @@ import React, { useState, useMemo } from "react";
 import { Review } from "../data/classifiedReviews";
 import { Star, Filter, ArrowUpDown, RefreshCw, MessageSquare, ShieldCheck, HelpCircle, AlertOctagon, Calendar, ChevronDown, ChevronUp, Database, Plus, Check, Loader2, Download } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
-import { useReviews } from "../context/ReviewsContext";
+import { useReviews, getGroupKeysMap } from "../context/ReviewsContext";
 
 export default function ReviewArchiveTab() {
   const { 
@@ -13,6 +13,9 @@ export default function ReviewArchiveTab() {
     addReview, 
     isSyncing 
   } = useReviews();
+
+  // Precompute group keys mapping for all reviews using high-precision similarity logic
+  const groupKeysMap = useMemo(() => getGroupKeysMap(reviewsData), [reviewsData]);
 
   // States
   const [selectedType, setSelectedType] = useState<"전체" | "추천" | "중립" | "비추천">("전체");
@@ -146,13 +149,17 @@ export default function ReviewArchiveTab() {
     }
 
     // 4. Sorting
-    // To keep reviews from the same post (same reviewer and same date) consecutive:
+    // To keep reviews from the same post (same reviewer, same date, and highly similar content) consecutive:
     // First, let's identify the group representative values.
     const groupRepresentatives = new Map<string, { maxId: number; minId: number; maxRating: number; minRating: number }>();
     
+    // High-precision helper to get group key
+    const getGroupKey = (r: any) => {
+      return groupKeysMap.get(r.id) || `group_fallback_${r.id}`;
+    };
+
     list.forEach(r => {
-      const reviewerName = r.reviewer || `고객#${r.id}`;
-      const groupKey = `${reviewerName}_${r.date}`;
+      const groupKey = getGroupKey(r);
       const current = groupRepresentatives.get(groupKey);
       if (!current) {
         groupRepresentatives.set(groupKey, {
@@ -170,10 +177,8 @@ export default function ReviewArchiveTab() {
     });
 
     list.sort((a, b) => {
-      const aReviewer = a.reviewer || `고객#${a.id}`;
-      const bReviewer = b.reviewer || `고객#${b.id}`;
-      const aGroupKey = `${aReviewer}_${a.date}`;
-      const bGroupKey = `${bReviewer}_${b.date}`;
+      const aGroupKey = getGroupKey(a);
+      const bGroupKey = getGroupKey(b);
 
       // If they belong to the same group (same post), keep them together
       if (aGroupKey === bGroupKey) {
@@ -784,11 +789,9 @@ export default function ReviewArchiveTab() {
                 {filteredAndSortedReviews.slice(0, visibleCount).map((item, index, arr) => {
                   const isExpanded = expandedReviewId === item.id;
                   
-                  // Check if this review belongs to the same post (same reviewer & date) as the previous one
+                  // Check if this review belongs to the same post (same reviewer, date, and highly similar content) as the previous one
                   const prevItem = index > 0 ? arr[index - 1] : null;
-                  const itemReviewer = item.reviewer || `고객#${item.id}`;
-                  const prevReviewer = prevItem ? (prevItem.reviewer || `고객#${prevItem.id}`) : null;
-                  const isSamePostAsPrev = prevItem && (itemReviewer === prevReviewer) && (item.date === prevItem.date);
+                  const isSamePostAsPrev = prevItem && groupKeysMap.get(item.id) === groupKeysMap.get(prevItem.id);
 
                   let typeLabelColor = "bg-blue-50 text-blue-700 ring-blue-700/10";
                   let typeIcon = <ShieldCheck className="h-3 w-3 text-blue-600" />;
@@ -810,16 +813,28 @@ export default function ReviewArchiveTab() {
                         className={`hover:bg-slate-50/50 transition cursor-pointer select-none ${isExpanded ? "bg-blue-50/10" : ""} ${isSamePostAsPrev ? "bg-slate-50/10" : ""}`}
                       >
                         <td className="py-3.5 px-4 text-center text-xs font-bold text-slate-700 border-r border-slate-50">
-                          {isSamePostAsPrev ? (
-                            <span className="text-[10px] text-slate-400 font-semibold italic flex items-center justify-center gap-1 bg-slate-50/30 py-1 rounded-md">
-                              ↳ <span className="opacity-70">위와 동일한 게시글</span>
-                            </span>
-                          ) : (
+                          <div className="flex flex-col items-center justify-center gap-1">
                             <div className="flex items-center justify-center gap-1.5 flex-wrap">
                               <span>
                                 {item.reviewer ? `${item.reviewer}님의 후기` : `고객#${item.id}님의 후기`}
                               </span>
-                              {item.image_url && (
+                              {item.image_urls && item.image_urls.length > 0 ? (
+                                <div className="inline-flex gap-1 items-center flex-wrap">
+                                  {item.image_urls.map((url, imgIdx) => (
+                                    <a 
+                                      key={imgIdx}
+                                      href={url} 
+                                      target="_blank" 
+                                      rel="noopener noreferrer"
+                                      className="inline-flex items-center justify-center h-5 shrink-0 bg-slate-100 hover:bg-blue-50 text-slate-500 hover:text-blue-600 transition text-[10px] font-bold px-1 py-0.5 rounded border border-slate-200"
+                                      title={`사진 후기 ${imgIdx + 1} 보기 (새 창)`}
+                                      onClick={(e) => e.stopPropagation()}
+                                    >
+                                      📷 #{imgIdx + 1}
+                                    </a>
+                                  ))}
+                                </div>
+                              ) : item.image_url && (
                                 <a 
                                   href={item.image_url} 
                                   target="_blank" 
@@ -832,7 +847,12 @@ export default function ReviewArchiveTab() {
                                 </a>
                               )}
                             </div>
-                          )}
+                            {isSamePostAsPrev && (
+                              <span className="text-[10px] text-slate-400 font-semibold italic flex items-center justify-center gap-1 bg-slate-50/50 px-2 py-0.5 rounded-md mt-0.5 border border-slate-100">
+                                ↳ <span className="opacity-80">위와 동일한 게시글</span>
+                              </span>
+                            )}
+                          </div>
                         </td>
                         <td className="py-3.5 px-3">
                           <div className="flex flex-col gap-1 items-start">
@@ -859,7 +879,23 @@ export default function ReviewArchiveTab() {
                         </td>
                         <td className="py-3.5 px-4 text-xs font-medium text-slate-600 max-w-sm truncate">
                           <div className="flex items-center gap-1.5 min-w-0">
-                            {item.image_url && (
+                            {item.image_urls && item.image_urls.length > 0 ? (
+                              <div className="flex gap-1 items-center shrink-0">
+                                {item.image_urls.map((url, imgIdx) => (
+                                  <a 
+                                    key={imgIdx}
+                                    href={url} 
+                                    target="_blank" 
+                                    rel="noopener noreferrer"
+                                    className="inline-flex items-center shrink-0 text-slate-500 hover:text-blue-600 transition hover:scale-110"
+                                    title={`사진 후기 ${imgIdx + 1} 보기 (새 창)`}
+                                    onClick={(e) => e.stopPropagation()}
+                                  >
+                                    📷
+                                  </a>
+                                ))}
+                              </div>
+                            ) : item.image_url && (
                               <a 
                                 href={item.image_url} 
                                 target="_blank" 
@@ -910,7 +946,24 @@ export default function ReviewArchiveTab() {
                                   <span className="text-xs font-bold text-slate-700">
                                     {item.reviewer ? `${item.reviewer}님의 후기` : "익명 고객님의 후기"}
                                   </span>
-                                  {item.image_url && (
+                                  {item.image_urls && item.image_urls.length > 0 ? (
+                                    <>
+                                      <div className="h-3 w-px bg-slate-200" />
+                                      <span className="text-xs font-bold text-slate-400">사진 첨부:</span>
+                                      {item.image_urls.map((url, imgIdx) => (
+                                        <a 
+                                          key={imgIdx}
+                                          href={url} 
+                                          target="_blank" 
+                                          rel="noopener noreferrer"
+                                          className="inline-flex items-center gap-1 text-xs font-bold text-blue-600 hover:text-blue-800 hover:underline bg-slate-50 px-1.5 py-0.5 rounded border border-slate-100"
+                                          title={`사진 후기 ${imgIdx + 1} 보기 (새 창)`}
+                                        >
+                                          📷 <span className="text-[11px] font-semibold">#{imgIdx + 1}</span>
+                                        </a>
+                                      ))}
+                                    </>
+                                  ) : item.image_url && (
                                     <>
                                       <div className="h-3 w-px bg-slate-200" />
                                       <a 
@@ -964,11 +1017,9 @@ export default function ReviewArchiveTab() {
             {filteredAndSortedReviews.slice(0, visibleCount).map((item, index, arr) => {
               const isExpanded = expandedReviewId === item.id;
               
-              // Check if this review belongs to the same post (same reviewer & date) as the previous one
+              // Check if this review belongs to the same post (same reviewer, date, and highly similar content) as the previous one
               const prevItem = index > 0 ? arr[index - 1] : null;
-              const itemReviewer = item.reviewer || `고객#${item.id}`;
-              const prevReviewer = prevItem ? (prevItem.reviewer || `고객#prevItem.id`) : null;
-              const isSamePostAsPrev = prevItem && (itemReviewer === prevReviewer) && (item.date === prevItem.date);
+              const isSamePostAsPrev = prevItem && groupKeysMap.get(item.id) === groupKeysMap.get(prevItem.id);
 
               let typeLabelColor = "bg-blue-50 text-blue-700 ring-blue-700/10";
               let typeIcon = <ShieldCheck className="h-3 w-3 text-blue-600" />;
@@ -993,32 +1044,51 @@ export default function ReviewArchiveTab() {
                   >
                     <div className="space-y-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
-                        {isSamePostAsPrev ? (
-                          <span className="text-[10px] text-slate-400 font-semibold italic">
-                            ↳ 위와 동일한 게시글 후기
-                          </span>
-                        ) : (
+                        <span className="text-[10px] font-bold text-slate-700">
+                          {item.reviewer ? `${item.reviewer}님의 후기` : `고객#${item.id}님의 후기`}
+                        </span>
+                        <span className="text-[10px] text-slate-400">|</span>
+                        <span className="text-[10px] text-slate-400">{item.date}</span>
+                        {item.image_urls && item.image_urls.length > 0 ? (
                           <>
-                            <span className="text-[10px] font-bold text-slate-700">
-                              {item.reviewer ? `${item.reviewer}님의 후기` : `고객#${item.id}님의 후기`}
-                            </span>
                             <span className="text-[10px] text-slate-400">|</span>
-                            <span className="text-[10px] text-slate-400">{item.date}</span>
-                            {item.image_url && (
-                              <>
-                                <span className="text-[10px] text-slate-400">|</span>
+                            <div className="inline-flex gap-1 items-center flex-wrap">
+                              {item.image_urls.map((url, imgIdx) => (
                                 <a 
-                                  href={item.image_url} 
+                                  key={imgIdx}
+                                  href={url} 
                                   target="_blank" 
                                   rel="noopener noreferrer"
-                                  className="text-xs hover:scale-110 active:scale-95 transition inline-flex items-center shrink-0"
+                                  className="text-[10px] bg-slate-100 hover:bg-blue-50 border border-slate-200 hover:scale-110 active:scale-95 transition inline-flex items-center justify-center shrink-0 px-1 rounded font-bold text-slate-600 hover:text-blue-600"
                                   onClick={(e) => e.stopPropagation()}
-                                  title="사진 후기 보기 (새 창)"
+                                  title={`사진 후기 ${imgIdx + 1} 보기 (새 창)`}
                                 >
-                                  📷
+                                  📷 #{imgIdx + 1}
                                 </a>
-                              </>
-                            )}
+                              ))}
+                            </div>
+                          </>
+                        ) : item.image_url && (
+                          <>
+                            <span className="text-[10px] text-slate-400">|</span>
+                            <a 
+                              href={item.image_url} 
+                              target="_blank" 
+                              rel="noopener noreferrer"
+                              className="text-xs hover:scale-110 active:scale-95 transition inline-flex items-center shrink-0"
+                              onClick={(e) => e.stopPropagation()}
+                              title="사진 후기 보기 (새 창)"
+                            >
+                              📷
+                            </a>
+                          </>
+                        )}
+                        {isSamePostAsPrev && (
+                          <>
+                            <span className="text-[10px] text-slate-400">|</span>
+                            <span className="text-[10px] text-slate-400 font-semibold italic bg-slate-100 px-1 rounded-sm">
+                              ↳ 위와 동일
+                            </span>
                           </>
                         )}
                       </div>
@@ -1065,7 +1135,23 @@ export default function ReviewArchiveTab() {
                         </p>
                       </div>
 
-                      {item.image_url && (
+                      {item.image_urls && item.image_urls.length > 0 ? (
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-[10px] text-slate-400 font-bold">첨부 이미지 ({item.image_urls.length}장):</span>
+                          {item.image_urls.map((url, imgIdx) => (
+                            <a 
+                              key={imgIdx}
+                              href={url} 
+                              target="_blank" 
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1 text-[11px] font-bold text-blue-600 hover:text-blue-800 hover:underline bg-slate-50 px-1.5 py-0.5 rounded border border-slate-100"
+                              title={`사진 후기 ${imgIdx + 1} 보기 (새 창)`}
+                            >
+                              📷 #{imgIdx + 1}
+                            </a>
+                          ))}
+                        </div>
+                      ) : item.image_url && (
                         <div className="flex items-center gap-2">
                           <span className="text-[10px] text-slate-400 font-bold">첨부 이미지:</span>
                           <a 
