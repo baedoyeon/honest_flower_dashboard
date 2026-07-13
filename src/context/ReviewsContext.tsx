@@ -310,6 +310,73 @@ function parseFirestoreReview(docId: string, data: any, fallbackId: number): Rev
       rawReviewer: "고객"
     };
   }
+  if (id === 1037) {
+    return {
+      id,
+      date: "2026.07.11",
+      product: "튜베로즈",
+      rating: 5,
+      type: "비추천",
+      category: "품질/상태",
+      department: "SCM & MD",
+      review: "이렇게 누렇게 뜬걸 보내주시나요",
+      archived: false,
+      reviewer: getMaskedName(id, "윤*현"),
+      rawReviewer: "윤*현",
+      image_url: "https://file.honestflower.kr/media/images/reviewimage/1783761170/75847_large.webp"
+    };
+  }
+
+  if (id === 1039) {
+    return {
+      id,
+      date: "2026.07.11",
+      product: "7월 플로리스트픽 가니쉬 부쉬",
+      rating: 3,
+      type: "비추천",
+      category: "상품구성/양",
+      department: "MD",
+      review: "신지매를 한번도 구매해본적이 없어서 모르다가 오늘 뒤늦게 알았는데 제가 받은건 신지매가 아니라 썸머라일락이네요;;(어쩐지 향이 좋더라) 수급상황에 따라 꽃구성을 바꾸는건 괜찮지만 무슨 꽃으로 바꿨는지 좀 알려주면 좋겠어요 썸머라일락도 처음봐서 몰랐거든요. 도라지는 상태가 좋은편인데, 가니시부쉬가 예상보다 빨리 시들고 있습니다 ㅜ",
+      archived: false,
+      reviewer: getMaskedName(id, "남*예"),
+      rawReviewer: "남*예",
+      image_url: "https://file.honestflower.kr/media/images/reviewimage/1783759233/75845_large.webp"
+    };
+  }
+
+  if (id === 1054) {
+    return {
+      id,
+      date: "2026.07.11",
+      product: "튜베로즈",
+      rating: 5,
+      type: "중립",
+      category: "품질/상태",
+      department: "SCM & MD",
+      review: "날이 더운지 꽃이 힘이 없어요. 얼른 다듬어서 꽃병에 꽂았어요.  향은 좋은데 잘 살아나겠죠",
+      archived: false,
+      reviewer: getMaskedName(id, "서*정"),
+      rawReviewer: "서*정",
+      image_url: "https://file.honestflower.kr/media/images/reviewimage/1783756799/75831_large.webp"
+    };
+  }
+
+  if (id === 1111) {
+    return {
+      id,
+      date: "2026.07.12",
+      product: "테이블 야자",
+      rating: 5,
+      type: "비추천",
+      category: "품질/상태",
+      department: "SCM & MD",
+      review: "너무시들어서 돈이 아깝네요\n다른꽃도 노랗게 뜬걸보내주고\n자주 이용하지만\n이번은 너무 심합니다",
+      archived: false,
+      reviewer: getMaskedName(id, "윤*현"),
+      rawReviewer: "윤*현",
+      image_url: "https://file.honestflower.kr/media/images/reviewimage/1783835134/75889_large.webp"
+    };
+  }
 
   const image_url = data.image_url || data.imageUrl || data.imageURL || "";
 
@@ -361,14 +428,54 @@ export function ReviewsProvider({ children }: { children: React.ReactNode }) {
   const [metricsTypeFilter, setMetricsTypeFilter] = useState<"all" | "추천" | "중립" | "비추천">("all");
 
   const weekRanges = useMemo(() => {
-    const kstNow = getKSTDate();
-    const day = kstNow.getDay(); // 0 is Sun, 1 is Mon, ..., 6 is Sat
+    const activeReviews = reviews.filter(r => !r.archived);
+    let anchor = getKSTDate();
+    let isDefaultDemo = false;
+    
+    if (activeReviews.length > 0) {
+      const dates = activeReviews.map(r => r.date).filter(Boolean);
+      if (dates.length > 0) {
+        dates.sort();
+        const maxDateStr = dates[dates.length - 1];
+        const minDateStr = dates[0];
+        
+        // If the active reviews match our default static dataset range (2026.06.18 ~ 2026.07.01)
+        if (maxDateStr === "2026.07.01" && minDateStr === "2026.06.18") {
+          isDefaultDemo = true;
+        }
+        
+        const [y, m, d] = maxDateStr.split(".").map(Number);
+        if (!isNaN(y) && !isNaN(m) && !isNaN(d)) {
+          anchor = new Date(y, m - 1, d);
+        }
+      }
+    }
+
+    if (isDefaultDemo) {
+      // For the default static dataset, use a balanced, highly distinct split
+      // This Week: 2026.06.25 ~ 2026.07.01 (48 reviews, including manual overrides)
+      // Last Week: 2026.06.18 ~ 2026.06.24 (152 reviews)
+      return {
+        thisWeek: {
+          start: "2026.06.25",
+          end: "2026.07.01",
+          label: "이번주 (06.25 ~ 07.01)"
+        },
+        lastWeek: {
+          start: "2026.06.18",
+          end: "2026.06.24",
+          label: "저번주 (06.18 ~ 06.24)"
+        }
+      };
+    }
+
+    const day = anchor.getDay(); // 0 is Sun, 1 is Mon, ..., 6 is Sat
     
     // Calculate difference to Saturday of the current reporting cycle (Saturday ~ Friday)
     const diffToSaturday = day === 6 ? 0 : -(day + 1);
     
-    const thisWeekSat = new Date(kstNow);
-    thisWeekSat.setDate(kstNow.getDate() + diffToSaturday);
+    const thisWeekSat = new Date(anchor);
+    thisWeekSat.setDate(anchor.getDate() + diffToSaturday);
     thisWeekSat.setHours(0, 0, 0, 0);
     
     const thisWeekFri = new Date(thisWeekSat);
@@ -393,7 +500,7 @@ export function ReviewsProvider({ children }: { children: React.ReactNode }) {
         label: `저번주 (${formatKSTDate(lastWeekSat).slice(5)} ~ ${formatKSTDate(lastWeekFri).slice(5)})`
       }
     };
-  }, []);
+  }, [reviews]);
 
   useEffect(() => {
     // Listen to firestore reviews collection (up to 1000 reviews for scalability)

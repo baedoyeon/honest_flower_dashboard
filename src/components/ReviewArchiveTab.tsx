@@ -28,6 +28,9 @@ export default function ReviewArchiveTab() {
   const [selectedYear, setSelectedYear] = useState<string>("전체");
   const [selectedMonth, setSelectedMonth] = useState<string>("전체");
   const [selectedDay, setSelectedDay] = useState<string>("전체");
+  const [dateFilterType, setDateFilterType] = useState<"dropdown" | "calendar">("dropdown");
+  const [calendarStart, setCalendarStart] = useState<string>("");
+  const [calendarEnd, setCalendarEnd] = useState<string>("");
   const [expandedReviewId, setExpandedReviewId] = useState<number | null>(null);
 
   // Add Live Review Form States
@@ -131,27 +134,38 @@ export default function ReviewArchiveTab() {
       );
     }
 
-    // 3.5 Filter by Date (Year, Month, Day)
-    if (selectedYear !== "전체") {
-      list = list.filter(r => r.date.startsWith(selectedYear));
-    }
-    if (selectedMonth !== "전체") {
-      list = list.filter(r => {
-        const parts = r.date.split('.');
-        return parts.length === 3 && parts[1] === selectedMonth;
-      });
-    }
-    if (selectedDay !== "전체") {
-      list = list.filter(r => {
-        const parts = r.date.split('.');
-        return parts.length === 3 && parts[2] === selectedDay;
-      });
+    // 3.5 Filter by Date (Dropdown or Calendar Range)
+    if (dateFilterType === "calendar") {
+      if (calendarStart) {
+        const startDot = calendarStart.replace(/-/g, ".");
+        list = list.filter(r => r.date >= startDot);
+      }
+      if (calendarEnd) {
+        const endDot = calendarEnd.replace(/-/g, ".");
+        list = list.filter(r => r.date <= endDot);
+      }
+    } else {
+      if (selectedYear !== "전체") {
+        list = list.filter(r => r.date.startsWith(selectedYear));
+      }
+      if (selectedMonth !== "전체") {
+        list = list.filter(r => {
+          const parts = r.date.split('.');
+          return parts.length === 3 && parts[1] === selectedMonth;
+        });
+      }
+      if (selectedDay !== "전체") {
+        list = list.filter(r => {
+          const parts = r.date.split('.');
+          return parts.length === 3 && parts[2] === selectedDay;
+        });
+      }
     }
 
     // 4. Sorting
     // To keep reviews from the same post (same reviewer, same date, and highly similar content) consecutive:
     // First, let's identify the group representative values.
-    const groupRepresentatives = new Map<string, { maxId: number; minId: number; maxRating: number; minRating: number }>();
+    const groupRepresentatives = new Map<string, { maxId: number; minId: number; maxRating: number; minRating: number; date: string }>();
     
     // High-precision helper to get group key
     const getGroupKey = (r: any) => {
@@ -166,7 +180,8 @@ export default function ReviewArchiveTab() {
           maxId: Number(r.id),
           minId: Number(r.id),
           maxRating: r.rating,
-          minRating: r.rating
+          minRating: r.rating,
+          date: r.date
         });
       } else {
         current.maxId = Math.max(current.maxId, Number(r.id));
@@ -191,20 +206,32 @@ export default function ReviewArchiveTab() {
       const bRep = groupRepresentatives.get(bGroupKey)!;
 
       if (sortBy === "id-desc") {
+        if (bRep.date !== aRep.date) {
+          return bRep.date.localeCompare(aRep.date);
+        }
         return bRep.maxId - aRep.maxId;
       }
       if (sortBy === "id-asc") {
+        if (aRep.date !== bRep.date) {
+          return aRep.date.localeCompare(bRep.date);
+        }
         return aRep.minId - bRep.minId;
       }
       if (sortBy === "rating-desc") {
         if (bRep.maxRating !== aRep.maxRating) {
           return bRep.maxRating - aRep.maxRating;
         }
+        if (bRep.date !== aRep.date) {
+          return bRep.date.localeCompare(aRep.date);
+        }
         return bRep.maxId - aRep.maxId; // Fallback to ID desc
       }
       if (sortBy === "rating-asc") {
         if (aRep.minRating !== bRep.minRating) {
           return aRep.minRating - bRep.minRating;
+        }
+        if (aRep.date !== bRep.date) {
+          return aRep.date.localeCompare(bRep.date);
         }
         return aRep.minId - bRep.minId; // Fallback to ID asc
       }
@@ -213,7 +240,7 @@ export default function ReviewArchiveTab() {
     });
 
     return list;
-  }, [reviewsData, selectedType, selectedCategory, searchQuery, sortBy, selectedYear, selectedMonth, selectedDay]);
+  }, [reviewsData, selectedType, selectedCategory, searchQuery, sortBy, selectedYear, selectedMonth, selectedDay, dateFilterType, calendarStart, calendarEnd]);
 
   // Dynamic badge counts based on CURRENT filter status (or overall)
   const statsCounts = useMemo(() => {
@@ -234,6 +261,9 @@ export default function ReviewArchiveTab() {
     setSelectedYear("전체");
     setSelectedMonth("전체");
     setSelectedDay("전체");
+    setDateFilterType("dropdown");
+    setCalendarStart("");
+    setCalendarEnd("");
     setExpandedReviewId(null);
     setVisibleCount(12);
   };
@@ -700,60 +730,178 @@ export default function ReviewArchiveTab() {
 
         <div className="h-px bg-slate-100" />
 
-        {/* Row 4: Time Archives (Year/Month/Day Drilldown Dropdowns) */}
-        <div className="space-y-3 bg-slate-50/50 rounded-2xl p-4 border border-slate-100">
-          <div className="flex items-center gap-1.5 text-slate-800 font-bold text-xs">
-            <Calendar className="h-4 w-4 text-blue-600" />
-            <span>시점별 아카이브 탐색 (드롭다운 필터)</span>
-            <span className="text-[10px] text-slate-400 font-medium">(원하는 연도, 월, 일을 순서대로 선택하여 상세히 필터링할 수 있습니다)</span>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            {/* Year Dropdown */}
-            <div className="space-y-1">
-              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">연도</label>
-              <select
-                value={selectedYear}
-                onChange={(e) => handleYearChange(e.target.value)}
-                className="w-full text-xs rounded-lg border border-slate-200 bg-white px-3 py-2 focus:outline-hidden focus:ring-1 focus:ring-blue-600 focus:border-blue-600 cursor-pointer"
-              >
-                <option value="전체">연도 전체</option>
-                {availableDates.years.map(y => (
-                  <option key={y} value={y}>{y}년</option>
-                ))}
-              </select>
+        {/* Row 4: Time Archives with Toggle (Dropdown / Calendar Range) */}
+        <div className="space-y-4 bg-slate-50/50 rounded-2xl p-4 border border-slate-100">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 pb-1">
+            <div className="flex items-center gap-1.5 text-slate-800 font-bold text-xs">
+              <Calendar className="h-4 w-4 text-blue-600" />
+              <span>시점별 아카이브 탐색</span>
             </div>
-
-            {/* Month Dropdown */}
-            <div className="space-y-1">
-              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">월</label>
-              <select
-                value={selectedMonth}
-                onChange={(e) => handleMonthChange(e.target.value)}
-                className="w-full text-xs rounded-lg border border-slate-200 bg-white px-3 py-2 focus:outline-hidden focus:ring-1 focus:ring-blue-600 focus:border-blue-600 cursor-pointer"
+            
+            {/* Toggle tabs for filter mode */}
+            <div className="flex rounded-lg bg-slate-100 p-0.5 border border-slate-200 self-start sm:self-auto">
+              <button
+                type="button"
+                onClick={() => {
+                  setDateFilterType("dropdown");
+                  setVisibleCount(12);
+                }}
+                className={`px-3 py-1 text-[11px] font-bold rounded-md transition cursor-pointer ${
+                  dateFilterType === "dropdown"
+                    ? "bg-white text-slate-800 shadow-2xs"
+                    : "text-slate-500 hover:text-slate-800"
+                }`}
               >
-                <option value="전체">월 전체</option>
-                {availableDates.months.map(m => (
-                  <option key={m} value={m}>{parseInt(m, 10)}월</option>
-                ))}
-              </select>
-            </div>
-
-            {/* Day Dropdown */}
-            <div className="space-y-1">
-              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">일자</label>
-              <select
-                value={selectedDay}
-                onChange={(e) => handleDayChange(e.target.value)}
-                className="w-full text-xs rounded-lg border border-slate-200 bg-white px-3 py-2 focus:outline-hidden focus:ring-1 focus:ring-blue-600 focus:border-blue-600 cursor-pointer"
+                드롭다운 방식
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setDateFilterType("calendar");
+                  setVisibleCount(12);
+                }}
+                className={`px-3 py-1 text-[11px] font-bold rounded-md transition cursor-pointer ${
+                  dateFilterType === "calendar"
+                    ? "bg-white text-slate-800 shadow-2xs"
+                    : "text-slate-500 hover:text-slate-800"
+                }`}
               >
-                <option value="전체">일자 전체</option>
-                {availableDates.days.map(d => (
-                  <option key={d} value={d}>{parseInt(d, 10)}일</option>
-                ))}
-              </select>
+                캘린더 범위 지정 (직접 선택)
+              </button>
             </div>
           </div>
+
+          {dateFilterType === "dropdown" ? (
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              {/* Year Dropdown */}
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">연도</label>
+                <select
+                  value={selectedYear}
+                  onChange={(e) => handleYearChange(e.target.value)}
+                  className="w-full text-xs rounded-lg border border-slate-200 bg-white px-3 py-2 focus:outline-hidden focus:ring-1 focus:ring-blue-600 focus:border-blue-600 cursor-pointer"
+                >
+                  <option value="전체">연도 전체</option>
+                  {availableDates.years.map(y => (
+                    <option key={y} value={y}>{y}년</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Month Dropdown */}
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">월</label>
+                <select
+                  value={selectedMonth}
+                  onChange={(e) => handleMonthChange(e.target.value)}
+                  className="w-full text-xs rounded-lg border border-slate-200 bg-white px-3 py-2 focus:outline-hidden focus:ring-1 focus:ring-blue-600 focus:border-blue-600 cursor-pointer"
+                >
+                  <option value="전체">월 전체</option>
+                  {availableDates.months.map(m => (
+                    <option key={m} value={m}>{parseInt(m, 10)}월</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Day Dropdown */}
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">일자</label>
+                <select
+                  value={selectedDay}
+                  onChange={(e) => handleDayChange(e.target.value)}
+                  className="w-full text-xs rounded-lg border border-slate-200 bg-white px-3 py-2 focus:outline-hidden focus:ring-1 focus:ring-blue-600 focus:border-blue-600 cursor-pointer"
+                >
+                  <option value="전체">일자 전체</option>
+                  {availableDates.days.map(d => (
+                    <option key={d} value={d}>{parseInt(d, 10)}일</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <div className="flex flex-col sm:flex-row items-end gap-3">
+                {/* Start Date */}
+                <div className="w-full sm:w-auto flex-1 space-y-1">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">시작일</label>
+                  <input
+                    type="date"
+                    value={calendarStart}
+                    onChange={(e) => {
+                      setCalendarStart(e.target.value);
+                      setVisibleCount(12);
+                    }}
+                    className="w-full text-xs rounded-lg border border-slate-200 bg-white px-3 py-2 focus:outline-hidden focus:ring-1 focus:ring-blue-600 focus:border-blue-600 cursor-pointer text-slate-700"
+                  />
+                </div>
+
+                {/* Separator */}
+                <div className="text-slate-400 text-xs font-bold pb-2.5 hidden sm:block">~</div>
+
+                {/* End Date */}
+                <div className="w-full sm:w-auto flex-1 space-y-1">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">종료일</label>
+                  <input
+                    type="date"
+                    value={calendarEnd}
+                    onChange={(e) => {
+                      setCalendarEnd(e.target.value);
+                      setVisibleCount(12);
+                    }}
+                    className="w-full text-xs rounded-lg border border-slate-200 bg-white px-3 py-2 focus:outline-hidden focus:ring-1 focus:ring-blue-600 focus:border-blue-600 cursor-pointer text-slate-700"
+                  />
+                </div>
+
+                {/* Quick Shortcuts */}
+                <div className="w-full sm:w-auto pb-1 flex flex-wrap gap-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCalendarStart("2026-07-06");
+                      setCalendarEnd("2026-07-12");
+                      setVisibleCount(12);
+                    }}
+                    className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg text-[10px] font-bold transition cursor-pointer"
+                  >
+                    최근 7일
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCalendarStart("2026-06-28");
+                      setCalendarEnd("2026-07-12");
+                      setVisibleCount(12);
+                    }}
+                    className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg text-[10px] font-bold transition cursor-pointer"
+                  >
+                    최근 15일
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCalendarStart("2026-07-01");
+                      setCalendarEnd("2026-07-31");
+                      setVisibleCount(12);
+                    }}
+                    className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg text-[10px] font-bold transition cursor-pointer"
+                  >
+                    7월 전체
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCalendarStart("");
+                      setCalendarEnd("");
+                      setVisibleCount(12);
+                    }}
+                    className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-500 rounded-lg text-[10px] font-bold transition cursor-pointer"
+                  >
+                    전체 해제
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
       </div>

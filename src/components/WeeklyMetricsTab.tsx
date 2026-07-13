@@ -1,5 +1,5 @@
 import { BarChart, Bar, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, LabelList } from "recharts";
-import { ArrowDownRight, ArrowUpRight, MessageSquare, AlertTriangle, Lightbulb, Users, BarChart2, Star, Search, Sparkles, ThumbsUp, X, Sprout } from "lucide-react";
+import { ArrowDownRight, ArrowUpRight, MessageSquare, AlertTriangle, Lightbulb, Users, BarChart2, Star, Search, Sparkles, ThumbsUp, X, Sprout, ArrowUpDown } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { useReviews, getGroupKeysMap } from "../context/ReviewsContext";
 import { useState, useMemo } from "react";
@@ -31,6 +31,7 @@ export default function WeeklyMetricsTab() {
 
   const [searchQuery, setSearchQuery] = useState("");
   const [visibleCount, setVisibleCount] = useState(5);
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
 
   // Dynamic calculations based on live reviews data
   const totalCount = reviewsData.length;
@@ -85,7 +86,7 @@ export default function WeeklyMetricsTab() {
     }
 
     // Group reviews with the same reviewer, date, and highly similar content consecutively
-    const groupRepresentatives = new Map<string, { maxId: number }>();
+    const groupRepresentatives = new Map<string, { maxId: number; date: string }>();
     
     // High-precision helper to get group key
     const getGroupKey = (r: any) => {
@@ -96,7 +97,7 @@ export default function WeeklyMetricsTab() {
       const groupKey = getGroupKey(r);
       const current = groupRepresentatives.get(groupKey);
       if (!current) {
-        groupRepresentatives.set(groupKey, { maxId: Number(r.id) });
+        groupRepresentatives.set(groupKey, { maxId: Number(r.id), date: r.date });
       } else {
         current.maxId = Math.max(current.maxId, Number(r.id));
       }
@@ -107,16 +108,29 @@ export default function WeeklyMetricsTab() {
       const bGroupKey = getGroupKey(b);
 
       if (aGroupKey === bGroupKey) {
-        return Number(b.id) - Number(a.id);
+        return sortOrder === "desc"
+          ? Number(b.id) - Number(a.id)
+          : Number(a.id) - Number(b.id);
       }
 
       const aRep = groupRepresentatives.get(aGroupKey)!;
       const bRep = groupRepresentatives.get(bGroupKey)!;
-      return bRep.maxId - aRep.maxId;
+
+      // Primary sort: Date (chronological)
+      if (aRep.date !== bRep.date) {
+        return sortOrder === "desc"
+          ? bRep.date.localeCompare(aRep.date)
+          : aRep.date.localeCompare(bRep.date);
+      }
+
+      // Secondary sort: maxId as tie-breaker
+      return sortOrder === "desc"
+        ? bRep.maxId - aRep.maxId
+        : aRep.maxId - bRep.maxId;
     });
 
     return list;
-  }, [reviewsData, selectedCardFilter, searchQuery]);
+  }, [reviewsData, selectedCardFilter, searchQuery, sortOrder, groupKeysMap]);
 
   // Dynamic insights text based on the selected card filter and current reviewsData
   const activeInsight = useMemo(() => {
@@ -580,19 +594,30 @@ export default function WeeklyMetricsTab() {
             </p>
           </div>
 
-          {/* Inline Search Bar */}
-          <div className="relative w-full sm:w-72">
-            <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
-            <input
-              type="text"
-              placeholder="상품명, 후기 내용 검색..."
-              value={searchQuery}
-              onChange={(e) => {
-                setSearchQuery(e.target.value);
-                setVisibleCount(5); // Reset load more count on search
-              }}
-              className="w-full bg-slate-50 border border-slate-200 text-xs text-slate-800 rounded-2xl pl-9 pr-4 py-2.5 focus:bg-white focus:outline-none focus:border-blue-400 font-medium transition"
-            />
+          {/* Inline Search Bar & Sort Toggle */}
+          <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+            <div className="relative flex-1 sm:w-64 min-w-[180px]">
+              <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+              <input
+                type="text"
+                placeholder="상품명, 후기 내용 검색..."
+                value={searchQuery}
+                onChange={(e) => {
+                  setSearchQuery(e.target.value);
+                  setVisibleCount(5); // Reset load more count on search
+                }}
+                className="w-full bg-slate-50 border border-slate-200 text-xs text-slate-800 rounded-2xl pl-9 pr-4 py-2.5 focus:bg-white focus:outline-none focus:border-blue-400 font-medium transition"
+              />
+            </div>
+            
+            <button
+              onClick={() => setSortOrder(prev => prev === "desc" ? "asc" : "desc")}
+              className="inline-flex items-center gap-1.5 px-3 py-2.5 bg-slate-50 hover:bg-slate-100 text-slate-600 hover:text-slate-800 border border-slate-200 rounded-2xl text-xs font-bold transition shrink-0 shadow-sm"
+              title={sortOrder === "desc" ? "내림차순 (최신순) - 클릭 시 오름차순 변경" : "오름차순 (과거순) - 클릭 시 내림차순 변경"}
+            >
+              <ArrowUpDown className="h-3.5 w-3.5 text-slate-500" />
+              <span>{sortOrder === "desc" ? "최신순" : "과거순"}</span>
+            </button>
           </div>
         </div>
 
