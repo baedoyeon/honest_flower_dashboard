@@ -560,7 +560,7 @@ export default function ReviewArchiveTab() {
                   placeholder="예: 배송 중 꽃잎이 시들어서 왔어요. 날씨가 너무 더워서 그런 것 같네요."
                   value={newReviewText}
                   onChange={(e) => setNewReviewText(e.target.value)}
-                  className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 bg-white focus:outline-hidden focus:ring-1 focus:ring-blue-600"
+                  className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 bg-white focus:outline-hidden focus:ring-1 focus:ring-brand-green"
                   required
                 />
               </div>
@@ -584,7 +584,7 @@ export default function ReviewArchiveTab() {
                     <button
                       type="submit"
                       disabled={isSubmitting}
-                      className="inline-flex items-center gap-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 px-5 py-2 text-xs font-bold text-white shadow-xs transition disabled:opacity-50 cursor-pointer"
+                      className="inline-flex items-center gap-1.5 rounded-xl bg-brand-green hover:bg-brand-green-dark px-5 py-2 text-xs font-bold text-white shadow-xs transition disabled:opacity-50 cursor-pointer"
                     >
                       {isSubmitting ? (
                         <>
@@ -621,7 +621,7 @@ export default function ReviewArchiveTab() {
                 setSearchQuery(e.target.value);
                 setVisibleCount(12); // Reset visible count on search
               }}
-              className="w-full pl-4 pr-10 py-2 text-xs rounded-lg border border-slate-200 focus:outline-hidden focus:ring-1 focus:ring-blue-600 focus:border-blue-600 bg-white"
+              className="w-full pl-4 pr-10 py-2 text-xs rounded-lg border border-slate-200 focus:outline-hidden focus:ring-1 focus:ring-brand-green focus:border-brand-green bg-white"
             />
           </div>
 
@@ -634,7 +634,7 @@ export default function ReviewArchiveTab() {
               <select
                 value={sortBy}
                 onChange={(e) => setSortBy(e.target.value as any)}
-                className="text-xs rounded-lg border border-slate-200 bg-white px-3 py-1.5 focus:outline-hidden focus:ring-1 focus:ring-blue-600 focus:border-blue-600"
+                className="text-xs rounded-lg border border-slate-200 bg-white px-3 py-1.5 focus:outline-hidden focus:ring-1 focus:ring-brand-green focus:border-brand-green"
               >
                 <option value="id-desc">최신순</option>
                 <option value="id-asc">과거순</option>
@@ -676,7 +676,7 @@ export default function ReviewArchiveTab() {
               const count = statsCounts[type];
               
               // Colors matching ratings
-              let activeColorClass = "bg-blue-600 text-white border-blue-600";
+              let activeColorClass = "bg-brand-green text-white border-brand-green";
               if (type === "중립") activeColorClass = "bg-amber-600 text-white border-amber-600";
               if (type === "비추천") activeColorClass = "bg-red-600 text-white border-red-600";
 
@@ -734,7 +734,7 @@ export default function ReviewArchiveTab() {
         <div className="space-y-4 bg-slate-50/50 rounded-2xl p-4 border border-slate-100">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 pb-1">
             <div className="flex items-center gap-1.5 text-slate-800 font-bold text-xs">
-              <Calendar className="h-4 w-4 text-blue-600" />
+              <Calendar className="h-4 w-4 text-brand-green" />
               <span>시점별 아카이브 탐색</span>
             </div>
             
@@ -779,7 +779,7 @@ export default function ReviewArchiveTab() {
                 <select
                   value={selectedYear}
                   onChange={(e) => handleYearChange(e.target.value)}
-                  className="w-full text-xs rounded-lg border border-slate-200 bg-white px-3 py-2 focus:outline-hidden focus:ring-1 focus:ring-blue-600 focus:border-blue-600 cursor-pointer"
+                  className="w-full text-xs rounded-lg border border-slate-200 bg-white px-3 py-2 focus:outline-hidden focus:ring-1 focus:ring-brand-green focus:border-brand-green cursor-pointer"
                 >
                   <option value="전체">연도 전체</option>
                   {availableDates.years.map(y => (
@@ -794,7 +794,7 @@ export default function ReviewArchiveTab() {
                 <select
                   value={selectedMonth}
                   onChange={(e) => handleMonthChange(e.target.value)}
-                  className="w-full text-xs rounded-lg border border-slate-200 bg-white px-3 py-2 focus:outline-hidden focus:ring-1 focus:ring-blue-600 focus:border-blue-600 cursor-pointer"
+                  className="w-full text-xs rounded-lg border border-slate-200 bg-white px-3 py-2 focus:outline-hidden focus:ring-1 focus:ring-brand-green focus:border-brand-green cursor-pointer"
                 >
                   <option value="전체">월 전체</option>
                   {availableDates.months.map(m => (
@@ -809,7 +809,7 @@ export default function ReviewArchiveTab() {
                 <select
                   value={selectedDay}
                   onChange={(e) => handleDayChange(e.target.value)}
-                  className="w-full text-xs rounded-lg border border-slate-200 bg-white px-3 py-2 focus:outline-hidden focus:ring-1 focus:ring-blue-600 focus:border-blue-600 cursor-pointer"
+                  className="w-full text-xs rounded-lg border border-slate-200 bg-white px-3 py-2 focus:outline-hidden focus:ring-1 focus:ring-brand-green focus:border-brand-green cursor-pointer"
                 >
                   <option value="전체">일자 전체</option>
                   {availableDates.days.map(d => (
@@ -831,7 +831,7 @@ export default function ReviewArchiveTab() {
                       setCalendarStart(e.target.value);
                       setVisibleCount(12);
                     }}
-                    className="w-full text-xs rounded-lg border border-slate-200 bg-white px-3 py-2 focus:outline-hidden focus:ring-1 focus:ring-blue-600 focus:border-blue-600 cursor-pointer text-slate-700"
+                    className="w-full text-xs rounded-lg border border-slate-200 bg-white px-3 py-2 focus:outline-hidden focus:ring-1 focus:ring-brand-green focus:border-brand-green cursor-pointer text-slate-700"
                   />
                 </div>
 
@@ -848,7 +848,7 @@ export default function ReviewArchiveTab() {
                       setCalendarEnd(e.target.value);
                       setVisibleCount(12);
                     }}
-                    className="w-full text-xs rounded-lg border border-slate-200 bg-white px-3 py-2 focus:outline-hidden focus:ring-1 focus:ring-blue-600 focus:border-blue-600 cursor-pointer text-slate-700"
+                    className="w-full text-xs rounded-lg border border-slate-200 bg-white px-3 py-2 focus:outline-hidden focus:ring-1 focus:ring-brand-green focus:border-brand-green cursor-pointer text-slate-700"
                   />
                 </div>
 
@@ -941,8 +941,8 @@ export default function ReviewArchiveTab() {
                   const prevItem = index > 0 ? arr[index - 1] : null;
                   const isSamePostAsPrev = prevItem && groupKeysMap.get(item.id) === groupKeysMap.get(prevItem.id);
 
-                  let typeLabelColor = "bg-blue-50 text-blue-700 ring-blue-700/10";
-                  let typeIcon = <ShieldCheck className="h-3 w-3 text-blue-600" />;
+                  let typeLabelColor = "bg-brand-green-light text-brand-green-dark ring-brand-green/20";
+                  let typeIcon = <ShieldCheck className="h-3 w-3 text-brand-green" />;
                   if (item.type === "중립") {
                     typeLabelColor = "bg-amber-50 text-amber-700 ring-amber-700/10";
                     typeIcon = <HelpCircle className="h-3 w-3 text-amber-500" />;
@@ -958,7 +958,7 @@ export default function ReviewArchiveTab() {
                       {/* Row */}
                       <tr 
                         onClick={() => setExpandedReviewId(isExpanded ? null : item.id)}
-                        className={`hover:bg-slate-50/50 transition cursor-pointer select-none ${isExpanded ? "bg-blue-50/10" : ""} ${isSamePostAsPrev ? "bg-slate-50/10" : ""}`}
+                        className={`hover:bg-slate-50/50 transition cursor-pointer select-none ${isExpanded ? "bg-brand-green-light/10" : ""} ${isSamePostAsPrev ? "bg-slate-50/10" : ""}`}
                       >
                         <td className="py-3.5 px-4 text-center text-xs font-bold text-slate-700 border-r border-slate-50">
                           <div className="flex flex-col items-center justify-center gap-1">
@@ -974,7 +974,7 @@ export default function ReviewArchiveTab() {
                                       href={url} 
                                       target="_blank" 
                                       rel="noopener noreferrer"
-                                      className="inline-flex items-center justify-center h-5 shrink-0 bg-slate-100 hover:bg-blue-50 text-slate-500 hover:text-blue-600 transition text-[10px] font-bold px-1 py-0.5 rounded border border-slate-200"
+                                      className="inline-flex items-center justify-center h-5 shrink-0 bg-slate-100 hover:bg-brand-green-light text-slate-500 hover:text-brand-green-dark transition text-[10px] font-bold px-1 py-0.5 rounded border border-slate-200"
                                       title={`사진 후기 ${imgIdx + 1} 보기 (새 창)`}
                                       onClick={(e) => e.stopPropagation()}
                                     >
@@ -987,7 +987,7 @@ export default function ReviewArchiveTab() {
                                   href={item.image_url} 
                                   target="_blank" 
                                   rel="noopener noreferrer"
-                                  className="inline-flex items-center shrink-0 text-slate-500 hover:text-blue-600 transition hover:scale-110"
+                                  className="inline-flex items-center shrink-0 text-slate-500 hover:text-brand-green-dark transition hover:scale-110"
                                   title="사진 후기 보기 (새 창)"
                                   onClick={(e) => e.stopPropagation()}
                                 >
@@ -1035,7 +1035,7 @@ export default function ReviewArchiveTab() {
                                     href={url} 
                                     target="_blank" 
                                     rel="noopener noreferrer"
-                                    className="inline-flex items-center shrink-0 text-slate-500 hover:text-blue-600 transition hover:scale-110"
+                                    className="inline-flex items-center shrink-0 text-slate-500 hover:text-brand-green-dark transition hover:scale-110"
                                     title={`사진 후기 ${imgIdx + 1} 보기 (새 창)`}
                                     onClick={(e) => e.stopPropagation()}
                                   >
@@ -1048,7 +1048,7 @@ export default function ReviewArchiveTab() {
                                 href={item.image_url} 
                                 target="_blank" 
                                 rel="noopener noreferrer"
-                                className="inline-flex items-center shrink-0 text-slate-500 hover:text-blue-600 transition hover:scale-110"
+                                className="inline-flex items-center shrink-0 text-slate-500 hover:text-brand-green-dark transition hover:scale-110"
                                 title="사진 후기 보기 (새 창)"
                                 onClick={(e) => e.stopPropagation()}
                               >
@@ -1104,7 +1104,7 @@ export default function ReviewArchiveTab() {
                                           href={url} 
                                           target="_blank" 
                                           rel="noopener noreferrer"
-                                          className="inline-flex items-center gap-1 text-xs font-bold text-blue-600 hover:text-blue-800 hover:underline bg-slate-50 px-1.5 py-0.5 rounded border border-slate-100"
+                                          className="inline-flex items-center gap-1 text-xs font-bold text-brand-green-dark hover:text-brand-green hover:underline bg-slate-50 px-1.5 py-0.5 rounded border border-slate-100"
                                           title={`사진 후기 ${imgIdx + 1} 보기 (새 창)`}
                                         >
                                           📷 <span className="text-[11px] font-semibold">#{imgIdx + 1}</span>
@@ -1118,7 +1118,7 @@ export default function ReviewArchiveTab() {
                                         href={item.image_url} 
                                         target="_blank" 
                                         rel="noopener noreferrer"
-                                        className="inline-flex items-center gap-1 text-xs font-bold text-blue-600 hover:text-blue-800 hover:underline"
+                                        className="inline-flex items-center gap-1 text-xs font-bold text-brand-green-dark hover:text-brand-green hover:underline"
                                         title="사진 후기 보기 (새 창)"
                                       >
                                         📷 <span className="text-[11px] font-semibold">사진 후기</span>
@@ -1139,7 +1139,7 @@ export default function ReviewArchiveTab() {
                                 <div className="absolute top-2 right-2 text-[9px] font-bold text-slate-300">
                                   등록일: {item.date}
                                 </div>
-                                <p className="text-xs text-slate-700 leading-relaxed font-medium pl-2 border-l-2 border-blue-500">
+                                <p className="text-xs text-slate-700 leading-relaxed font-medium pl-2 border-l-2 border-brand-green">
                                   &ldquo;{item.review}&rdquo;
                                 </p>
                               </div>
@@ -1169,8 +1169,8 @@ export default function ReviewArchiveTab() {
               const prevItem = index > 0 ? arr[index - 1] : null;
               const isSamePostAsPrev = prevItem && groupKeysMap.get(item.id) === groupKeysMap.get(prevItem.id);
 
-              let typeLabelColor = "bg-blue-50 text-blue-700 ring-blue-700/10";
-              let typeIcon = <ShieldCheck className="h-3 w-3 text-blue-600" />;
+              let typeLabelColor = "bg-brand-green-light text-brand-green-dark ring-brand-green/20";
+              let typeIcon = <ShieldCheck className="h-3 w-3 text-brand-green" />;
               if (item.type === "중립") {
                 typeLabelColor = "bg-amber-50 text-amber-700 ring-amber-700/10";
                 typeIcon = <HelpCircle className="h-3 w-3 text-amber-500" />;
@@ -1184,7 +1184,7 @@ export default function ReviewArchiveTab() {
               return (
                 <div 
                   key={item.id} 
-                  className={`p-4 transition ${isExpanded ? "bg-blue-50/10" : "bg-white"} ${isSamePostAsPrev ? "bg-slate-50/5" : ""}`}
+                  className={`p-4 transition ${isExpanded ? "bg-brand-green-light/10" : "bg-white"} ${isSamePostAsPrev ? "bg-slate-50/5" : ""}`}
                 >
                   <div 
                     onClick={() => setExpandedReviewId(isExpanded ? null : item.id)}
@@ -1207,7 +1207,7 @@ export default function ReviewArchiveTab() {
                                   href={url} 
                                   target="_blank" 
                                   rel="noopener noreferrer"
-                                  className="text-[10px] bg-slate-100 hover:bg-blue-50 border border-slate-200 hover:scale-110 active:scale-95 transition inline-flex items-center justify-center shrink-0 px-1 rounded font-bold text-slate-600 hover:text-blue-600"
+                                  className="text-[10px] bg-slate-100 hover:bg-brand-green-light border border-slate-200 hover:scale-110 active:scale-95 transition inline-flex items-center justify-center shrink-0 px-1 rounded font-bold text-slate-600 hover:text-brand-green-dark"
                                   onClick={(e) => e.stopPropagation()}
                                   title={`사진 후기 ${imgIdx + 1} 보기 (새 창)`}
                                 >
@@ -1292,7 +1292,7 @@ export default function ReviewArchiveTab() {
                               href={url} 
                               target="_blank" 
                               rel="noopener noreferrer"
-                              className="inline-flex items-center gap-1 text-[11px] font-bold text-blue-600 hover:text-blue-800 hover:underline bg-slate-50 px-1.5 py-0.5 rounded border border-slate-100"
+                              className="inline-flex items-center gap-1 text-[11px] font-bold text-brand-green-dark hover:text-brand-green hover:underline bg-slate-50 px-1.5 py-0.5 rounded border border-slate-100"
                               title={`사진 후기 ${imgIdx + 1} 보기 (새 창)`}
                             >
                               📷 #{imgIdx + 1}
@@ -1306,7 +1306,7 @@ export default function ReviewArchiveTab() {
                             href={item.image_url} 
                             target="_blank" 
                             rel="noopener noreferrer"
-                            className="inline-flex items-center gap-1 text-[11px] font-bold text-blue-600 hover:text-blue-800 hover:underline"
+                            className="inline-flex items-center gap-1 text-[11px] font-bold text-brand-green-dark hover:text-brand-green hover:underline"
                             title="사진 후기 보기 (새 창)"
                           >
                             📷 사진 링크 열기

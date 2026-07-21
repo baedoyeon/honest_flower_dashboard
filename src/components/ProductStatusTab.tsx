@@ -291,7 +291,7 @@ export default function ProductStatusTab() {
               placeholder="상품명 검색..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-9 pr-4 py-1.5 text-xs rounded-lg border border-slate-200 focus:outline-hidden focus:ring-1 focus:ring-blue-600 focus:border-blue-600 bg-white"
+              className="w-full pl-9 pr-4 py-1.5 text-xs rounded-lg border border-slate-200 focus:outline-hidden focus:ring-1 focus:ring-brand-green focus:border-brand-green bg-white"
             />
           </div>
         </div>
@@ -389,7 +389,7 @@ export default function ProductStatusTab() {
                       <td className="whitespace-nowrap px-4 py-4 text-center text-xs font-medium text-slate-600">
                         {item.totalCount}건
                       </td>
-                      <td className="whitespace-nowrap px-4 py-4 text-center text-xs text-blue-600 font-semibold">
+                      <td className="whitespace-nowrap px-4 py-4 text-center text-xs text-brand-green-dark font-semibold">
                         <button
                           onClick={() => {
                             if (item.recommend > 0) {
@@ -400,7 +400,7 @@ export default function ProductStatusTab() {
                           }}
                           className={`px-2 py-1 rounded-md transition-all ${
                             item.recommend > 0 
-                              ? "hover:bg-blue-50 hover:underline cursor-pointer text-blue-600 font-bold animate-pulse-subtle" 
+                              ? "hover:bg-brand-green-light hover:underline cursor-pointer text-brand-green-dark font-bold animate-pulse-subtle" 
                               : "text-slate-300 pointer-events-none"
                           }`}
                         >

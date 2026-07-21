@@ -1,4 +1,4 @@
-import { ClipboardCheck, Calendar, FileText, RefreshCw, Cloud, AlertCircle } from "lucide-react";
+import { Calendar, FileText, RefreshCw, Cloud, AlertCircle } from "lucide-react";
 import { useReviews } from "../context/ReviewsContext";
 
 // Helper: Get current date in KST (YYYY.MM.DD)
@@ -20,26 +20,22 @@ export default function Header() {
     <header className="bg-white border-b border-slate-200 shrink-0">
       <div className="mx-auto max-w-7xl px-4 py-5 sm:px-6 lg:px-8">
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-          <div className="flex items-center gap-3.5">
-            {/* Elegant brand logo mark from design */}
-            <div className="w-9 h-9 bg-blue-600 rounded-xl flex items-center justify-center shrink-0 shadow-md shadow-blue-100">
-              <div className="w-4 h-4 bg-white rounded-full"></div>
+          <div className="flex flex-col gap-2">
+            {/* Beautiful Honest Flower Trademark Replica from PDF */}
+            <div className="flex flex-col justify-center bg-brand-green px-5 py-3.5 rounded-2xl shrink-0 shadow-lg shadow-brand-green/20 text-white select-none transition-transform hover:scale-105 duration-300 w-fit">
+              <span className="text-[8px] font-bold tracking-wider opacity-90 leading-none font-sans uppercase">
+                Flowers make feel better.
+              </span>
+              <span className="text-lg font-black tracking-widest uppercase mt-1.5 font-sans leading-none">
+                HONEST FLOWER
+              </span>
             </div>
-            <div>
-              {/* Brand Category Badge */}
-              <div className="flex items-center gap-2 mb-1">
-                <span className="inline-flex items-center rounded-full bg-blue-50 px-2.5 py-0.5 text-[10px] font-bold text-blue-600 uppercase tracking-wider">
-                  CS & QUALITY VOC REPORT
-                </span>
-                <span className="inline-flex items-center gap-1 text-[11px] text-slate-400 font-medium">
-                  <ClipboardCheck className="h-3.5 w-3.5 text-slate-400" /> 전사 공유 위클리 리포트
-                </span>
-              </div>
-              
-              {/* Main Title */}
-              <h1 className="text-xl font-extrabold tracking-tight text-slate-900 sm:text-2xl">
-                어니스트플라워 위클리 후기 모니터링
-              </h1>
+            
+            {/* Brand Category Badge under the Trademark */}
+            <div className="flex items-center gap-2 mt-1">
+              <span className="inline-flex items-center rounded-full bg-brand-green-light px-2.5 py-0.5 text-[10px] font-bold text-brand-green-dark uppercase tracking-wider">
+                CS & QUALITY VOC REPORT
+              </span>
             </div>
           </div>
 
@@ -64,7 +60,7 @@ export default function Header() {
               className="flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-2xl font-bold shadow-xs transition duration-200 cursor-pointer disabled:opacity-50"
               title="파이어베이스에서 최신 데이터를 새로 가져옵니다."
             >
-              <RefreshCw className={`h-3.5 w-3.5 text-slate-500 ${isSyncing ? "animate-spin text-blue-600" : ""}`} />
+              <RefreshCw className={`h-3.5 w-3.5 text-slate-500 ${isSyncing ? "animate-spin text-brand-green" : ""}`} />
               데이터 새로고침
             </button>
 
@@ -72,8 +68,8 @@ export default function Header() {
               <Calendar className="h-3.5 w-3.5 text-slate-400" /> 
               {todayStr} 기준
             </span>
-            <span className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-600 rounded-2xl font-bold">
-              <FileText className="h-3.5 w-3.5 text-blue-500" /> 
+            <span className="flex items-center gap-1.5 px-3 py-1.5 bg-brand-green-light text-brand-green-dark rounded-2xl font-bold">
+              <FileText className="h-3.5 w-3.5 text-brand-green" /> 
               사진 후기 {weeklyReviews.length}건 분석
             </span>
           </div>

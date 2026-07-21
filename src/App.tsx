@@ -43,7 +43,7 @@ function AppContent() {
         {/* Week Filter Bar */}
         <div className="bg-white border border-slate-100 rounded-3xl p-5 shadow-xs flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div className="flex items-center gap-2">
-            <Calendar className="h-4 w-4 text-blue-500" />
+            <Calendar className="h-4 w-4 text-brand-green" />
             <span className="text-xs font-black text-slate-800">주차별 VOC 조회 필터</span>
             <span className="text-[10px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full font-bold">토요일 시작 기준</span>
           </div>
@@ -56,7 +56,7 @@ function AppContent() {
                   onClick={() => setWeekFilter(opt.id)}
                   className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
                     isSelected
-                      ? "bg-white text-blue-600 shadow-sm"
+                      ? "bg-white text-brand-green-dark shadow-sm"
                       : "text-slate-400 hover:text-slate-700"
                   }`}
                 >
@@ -77,7 +77,7 @@ function AppContent() {
                 onClick={() => setActiveTab(tab.id)}
                 className={`relative flex items-center gap-2 rounded-xl px-5 py-3 text-xs font-bold transition duration-200 cursor-pointer ${
                   isActive 
-                    ? "text-blue-600 bg-blue-50/50" 
+                    ? "text-brand-green-dark bg-brand-green-light" 
                     : "text-slate-400 hover:text-slate-700 hover:bg-slate-50"
                 }`}
               >
@@ -85,7 +85,7 @@ function AppContent() {
                 {isActive && (
                   <motion.div 
                     layoutId="activeTabIndicator"
-                    className="absolute left-1.5 right-1.5 bottom-0 h-0.5 bg-blue-600 rounded-full"
+                    className="absolute left-1.5 right-1.5 bottom-0 h-0.5 bg-brand-green rounded-full"
                     transition={{ type: "spring", stiffness: 380, damping: 30 }}
                   />
                 )}
@@ -115,7 +115,7 @@ function AppContent() {
           <p>&copy; 2026 어니스트플라워 (Honest Flower). All rights reserved.</p>
           <div className="mt-2 sm:mt-0 flex justify-center gap-4">
             <span className="flex items-center gap-1 font-semibold text-slate-500">
-              <Sparkles className="h-3 w-3 text-blue-500" /> CS & SCM 조기대응시스템
+              <Sparkles className="h-3 w-3 text-brand-green" /> CS & SCM 조기대응시스템
             </span>
             <span>|</span>
             <span className="flex items-center gap-1 font-semibold text-slate-500">

@@ -255,14 +255,14 @@ export default function WeeklyMetricsTab() {
     >
       {/* Active Product Filter Alert Banner */}
       {metricsProductFilter && (
-        <div className="bg-blue-50 border border-blue-100 rounded-3xl p-5 shadow-xs flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div className="bg-brand-green-light border border-brand-green/20 rounded-3xl p-5 shadow-xs flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div className="flex items-center gap-3">
-            <div className="bg-blue-600 text-white rounded-2xl p-2.5 shadow-sm">
+            <div className="bg-brand-green text-white rounded-2xl p-2.5 shadow-sm">
               <Sprout className="h-5 w-5" />
             </div>
             <div>
               <h3 className="text-sm font-black text-slate-800">
-                상품 상세 분석 모드: <span className="text-blue-600">{metricsProductFilter}</span>
+                상품 상세 분석 모드: <span className="text-brand-green-dark">{metricsProductFilter}</span>
               </h3>
               <p className="text-xs text-slate-500 font-semibold mt-0.5">
                 선택한 상품의 주간 핵심 지표, 누적 만족도 추이, 그리고 원본 피드백을 단독 조회 중입니다.
@@ -274,7 +274,7 @@ export default function WeeklyMetricsTab() {
               setMetricsProductFilter("");
               setSelectedCardFilter("all");
             }}
-            className="flex items-center gap-1.5 rounded-xl border border-blue-200 bg-white hover:bg-slate-50 text-slate-700 px-4 py-2.5 text-xs font-bold transition cursor-pointer"
+            className="flex items-center gap-1.5 rounded-xl border border-brand-green/20 bg-white hover:bg-slate-50 text-slate-700 px-4 py-2.5 text-xs font-bold transition cursor-pointer"
           >
             <X className="h-3.5 w-3.5" />
             <span>필터 전체 해제 (Reset Filter)</span>
@@ -348,25 +348,25 @@ export default function WeeklyMetricsTab() {
           onClick={() => setSelectedCardFilter("추천")}
           className={`relative overflow-hidden rounded-3xl p-6 shadow-sm border text-left flex flex-col justify-between transition-all cursor-pointer hover:scale-[1.02] active:scale-95 duration-200 ${
             selectedCardFilter === "추천"
-              ? "bg-blue-600 text-white border-blue-600 shadow-lg shadow-blue-100 ring-4 ring-blue-600/20"
-              : "bg-blue-50/30 text-blue-900 border-blue-100/40 hover:bg-blue-50/60"
+              ? "bg-brand-green text-white border-brand-green shadow-lg shadow-brand-green/20 ring-4 ring-brand-green/20"
+              : "bg-brand-green-light/20 text-brand-green-dark border-brand-green/10 hover:bg-brand-green-light/50"
           }`}
         >
           <div className="flex items-center justify-between w-full">
             <div>
-              <p className={`text-[10px] font-black uppercase tracking-wider ${selectedCardFilter === "추천" ? "text-blue-100" : "text-blue-500"}`}>
+              <p className={`text-[10px] font-black uppercase tracking-wider ${selectedCardFilter === "추천" ? "text-brand-green-light" : "text-brand-green-dark"}`}>
                 추천 (Positive)
               </p>
               <div className="flex items-baseline gap-1.5 mt-2">
                 <h3 className="text-3xl font-black">{recommendCount}</h3>
-                <span className={`text-xs font-bold ${selectedCardFilter === "추천" ? "text-blue-100" : "text-blue-500/80"}`}>{recommendRate}%</span>
+                <span className={`text-xs font-bold ${selectedCardFilter === "추천" ? "text-brand-green-light" : "text-brand-green-dark/80"}`}>{recommendRate}%</span>
               </div>
             </div>
-            <div className={`rounded-2xl p-2.5 transition-colors ${selectedCardFilter === "추천" ? "bg-white/10 text-white" : "bg-blue-50 text-blue-500"}`}>
+            <div className={`rounded-2xl p-2.5 transition-colors ${selectedCardFilter === "추천" ? "bg-white/10 text-white" : "bg-brand-green-light text-brand-green-dark"}`}>
               <ThumbsUp className="h-5 w-5" />
             </div>
           </div>
-          <div className={`mt-4 flex items-center gap-1 text-[10px] border-t pt-3 w-full font-bold ${selectedCardFilter === "추천" ? "border-white/10 text-blue-100" : "border-blue-100/30 text-blue-600"}`}>
+          <div className={`mt-4 flex items-center gap-1 text-[10px] border-t pt-3 w-full font-bold ${selectedCardFilter === "추천" ? "border-white/10 text-brand-green-light" : "border-brand-green/20 text-brand-green-dark"}`}>
             <span className="flex items-center font-black">
               {isRecommendLower ? (
                 <ArrowDownRight className="h-3.5 w-3.5 mr-0.5" />
@@ -446,11 +446,11 @@ export default function WeeklyMetricsTab() {
           <div className="mb-4 flex items-center justify-between">
             <div>
               <h4 className="text-base font-bold text-slate-900 flex items-center gap-2">
-                <BarChart2 className="h-4 w-4 text-blue-600" /> 
+                <BarChart2 className="h-4 w-4 text-brand-green" /> 
                 <span>금주 사진 후기 vs 전사 누적 NPS 분포 비교</span>
                 {selectedCardFilter !== "all" && (
                   <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase transition-colors ${
-                    selectedCardFilter === "추천" ? "bg-blue-100 text-blue-700" :
+                    selectedCardFilter === "추천" ? "bg-brand-green-light text-brand-green-dark border border-brand-green/10" :
                     selectedCardFilter === "중립" ? "bg-amber-100 text-amber-700" : "bg-red-100 text-red-700"
                   }`}>
                     {selectedCardFilter} 필터링됨
@@ -480,7 +480,7 @@ export default function WeeklyMetricsTab() {
                 <Legend iconType="circle" wrapperStyle={{ fontSize: 11, fontWeight: "bold" }} />
                 
                 {/* Weekly Photo Reviews with interactive cell coloring based on selected filter */}
-                <Bar dataKey={`금주 사진 후기 (${totalCount}건)`} fill="#2563eb" radius={[6, 6, 0, 0]}>
+                <Bar dataKey={`금주 사진 후기 (${totalCount}건)`} fill="#7cb342" radius={[6, 6, 0, 0]}>
                   {comparisonData.map((entry, index) => {
                     const isMatched = 
                       selectedCardFilter === "all" ||
@@ -488,7 +488,7 @@ export default function WeeklyMetricsTab() {
                       (selectedCardFilter === "중립" && entry.name.includes("중립")) ||
                       (selectedCardFilter === "비추천" && entry.name.includes("비추천"));
                       
-                    let cellColor = "#2563eb"; // default active blue
+                    let cellColor = "#7cb342"; // default active brand green
                     if (selectedCardFilter !== "all" && !isMatched) {
                       cellColor = "#cbd5e1"; // dim other bars
                     } else if (selectedCardFilter === "중립" && isMatched) {
@@ -513,18 +513,18 @@ export default function WeeklyMetricsTab() {
 
         {/* Insight Column with dynamic, responsive theme shifting */}
         <div className={`rounded-3xl border p-6 shadow-xs flex flex-col justify-between transition-colors duration-300 ${
-          selectedCardFilter === "추천" ? "border-blue-200 bg-blue-50/20" :
+          selectedCardFilter === "추천" ? "border-brand-green/20 bg-brand-green-light/25" :
           selectedCardFilter === "중립" ? "border-amber-200 bg-amber-50/20" :
           selectedCardFilter === "비추천" ? "border-red-200 bg-red-50/20" :
-          "border-blue-100 bg-blue-50/30"
+          "border-brand-green/20 bg-brand-green-light/10"
         }`}>
           <div className="space-y-4">
             <div className="flex items-center gap-2">
               <div className={`rounded-xl p-2 text-white shadow-sm transition-colors duration-300 ${
-                selectedCardFilter === "추천" ? "bg-blue-600 shadow-blue-100" :
+                selectedCardFilter === "추천" ? "bg-brand-green shadow-brand-green/20" :
                 selectedCardFilter === "중립" ? "bg-amber-500 shadow-amber-100" :
                 selectedCardFilter === "비추천" ? "bg-red-600 shadow-red-100" :
-                "bg-blue-600 shadow-blue-100"
+                "bg-brand-green shadow-brand-green/20"
               }`}>
                 <Lightbulb className="h-5 w-5" />
               </div>
@@ -533,16 +533,16 @@ export default function WeeklyMetricsTab() {
 
             <div className="space-y-3.5">
               <div className={`rounded-2xl bg-white p-5 border shadow-xs transition-colors duration-300 ${
-                selectedCardFilter === "추천" ? "border-blue-100/60" :
+                selectedCardFilter === "추천" ? "border-brand-green/10" :
                 selectedCardFilter === "중립" ? "border-amber-100/60" :
                 selectedCardFilter === "비추천" ? "border-red-100/60" :
-                "border-blue-100/50"
+                "border-brand-green/10"
               }`}>
                 <h5 className={`text-xs font-black mb-1.5 uppercase tracking-wide ${
-                  selectedCardFilter === "추천" ? "text-blue-900" :
+                  selectedCardFilter === "추천" ? "text-brand-green-dark" :
                   selectedCardFilter === "중립" ? "text-amber-950" :
                   selectedCardFilter === "비추천" ? "text-red-950" :
-                  "text-blue-900"
+                  "text-brand-green-dark"
                 }`}>
                   {activeInsight.sub}
                 </h5>
@@ -557,16 +557,16 @@ export default function WeeklyMetricsTab() {
           </div>
 
           <div className={`mt-5 border-t pt-4 transition-colors duration-300 ${
-            selectedCardFilter === "추천" ? "border-blue-100" :
+            selectedCardFilter === "추천" ? "border-brand-green/25" :
             selectedCardFilter === "중립" ? "border-amber-100" :
             selectedCardFilter === "비추천" ? "border-red-100" :
-            "border-blue-100"
+            "border-brand-green/20"
           }`}>
             <div className={`flex flex-col gap-1 text-[11px] font-bold p-3.5 rounded-xl border transition-colors duration-300 ${
-              selectedCardFilter === "추천" ? "text-blue-700 bg-blue-50/50 border-blue-100/40" :
+              selectedCardFilter === "추천" ? "text-brand-green-dark bg-brand-green-light/50 border-brand-green/10" :
               selectedCardFilter === "중립" ? "text-amber-800 bg-amber-50/50 border-amber-100/40" :
               selectedCardFilter === "비추천" ? "text-red-800 bg-red-50/50 border-red-100/40" :
-              "text-blue-700 bg-blue-50 border-blue-100/40"
+              "text-brand-green-dark bg-brand-green-light border-brand-green/10"
             }`}>
               <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">추천 관리 가이드라인</span>
               <span className="text-xs leading-relaxed">{activeInsight.tip}</span>
@@ -606,7 +606,7 @@ export default function WeeklyMetricsTab() {
                   setSearchQuery(e.target.value);
                   setVisibleCount(5); // Reset load more count on search
                 }}
-                className="w-full bg-slate-50 border border-slate-200 text-xs text-slate-800 rounded-2xl pl-9 pr-4 py-2.5 focus:bg-white focus:outline-none focus:border-blue-400 font-medium transition"
+                className="w-full bg-slate-50 border border-slate-200 text-xs text-slate-800 rounded-2xl pl-9 pr-4 py-2.5 focus:bg-white focus:outline-none focus:border-brand-green font-medium transition"
               />
             </div>
             
@@ -631,7 +631,7 @@ export default function WeeklyMetricsTab() {
             <div className="grid grid-cols-1 gap-4">
               {filteredReviews.slice(0, visibleCount).map((r, index, arr) => {
                 const sentimentTheme = 
-                  r.type === "추천" ? { bg: "bg-blue-50 text-blue-700 border-blue-100", label: "추천" } :
+                  r.type === "추천" ? { bg: "bg-brand-green-light text-brand-green-dark border-brand-green/10", label: "추천" } :
                   r.type === "중립" ? { bg: "bg-amber-50 text-amber-700 border-amber-100", label: "중립" } :
                   { bg: "bg-red-50 text-red-700 border-red-100", label: "비추천" };
 
@@ -643,7 +643,7 @@ export default function WeeklyMetricsTab() {
                   <div
                     key={r.id}
                     className={`border border-slate-100 bg-white hover:border-slate-200 hover:shadow-xs p-5 rounded-2xl flex flex-col md:flex-row gap-4 items-start justify-between transition-all duration-200 ${
-                      isSamePostAsPrev ? "border-l-4 border-l-blue-400 bg-blue-50/5/10 ml-2 md:ml-4" : ""
+                      isSamePostAsPrev ? "border-l-4 border-l-brand-green bg-brand-green-light/5 ml-2 md:ml-4" : ""
                     }`}
                   >
                     <div className="space-y-2 flex-1">
@@ -656,7 +656,7 @@ export default function WeeklyMetricsTab() {
                         </span>
                         {isSamePostAsPrev && (
                           <span className="text-[10px] text-slate-400 font-bold bg-slate-50 border border-slate-100 px-2 py-0.5 rounded-md flex items-center gap-1">
-                            ↳ <span className="text-blue-600">위와 동일한 게시글</span>
+                            ↳ <span className="text-brand-green-dark">위와 동일한 게시글</span>
                           </span>
                         )}
                         <span className="text-[11px] font-bold text-slate-800">
@@ -670,7 +670,7 @@ export default function WeeklyMetricsTab() {
                                 href={url} 
                                 target="_blank" 
                                 rel="noopener noreferrer"
-                                className="inline-flex items-center justify-center h-5 shrink-0 bg-slate-100 hover:bg-blue-50 text-slate-500 hover:text-blue-600 transition text-[10px] font-bold px-1 py-0.5 rounded border border-slate-200"
+                                className="inline-flex items-center justify-center h-5 shrink-0 bg-slate-100 hover:bg-brand-green-light text-slate-500 hover:text-brand-green-dark transition text-[10px] font-bold px-1 py-0.5 rounded border border-slate-200"
                                 title={`사진 후기 ${imgIdx + 1} 보기 (새 창)`}
                                 onClick={(e) => e.stopPropagation()}
                               >

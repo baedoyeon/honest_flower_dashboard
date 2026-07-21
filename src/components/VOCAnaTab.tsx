@@ -82,7 +82,7 @@ export default function VOCAnaTab() {
                 <Legend iconType="circle" wrapperStyle={{ fontSize: 11, fontWeight: "bold" }} />
                 
                 {/* Stacked bars - Vibrant Palette Colors */}
-                <Bar dataKey="추천 (만족)" stackId="a" fill="#2563eb" radius={[0, 0, 0, 0]} />
+                <Bar dataKey="추천 (만족)" stackId="a" fill="#7cb342" radius={[0, 0, 0, 0]} />
                 <Bar dataKey="중립 (보통)" stackId="a" fill="#94a3b8" radius={[0, 0, 0, 0]} />
                 <Bar dataKey="비추천 (불만)" stackId="a" fill="#ef4444" radius={[6, 6, 0, 0]} />
               </BarChart>
@@ -95,7 +95,7 @@ export default function VOCAnaTab() {
           <div>
             <div className="mb-4">
               <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
-                <Building2 className="h-4 w-4 text-blue-600" /> 책임 부서 VOC 매핑 현황
+                <Building2 className="h-4 w-4 text-brand-green" /> 책임 부서 VOC 매핑 현황
               </h3>
               <p className="text-xs text-slate-400">카테고리별 품질 불만 발생 시 해결/대응 주관 팀입니다.</p>
             </div>
@@ -120,7 +120,7 @@ export default function VOCAnaTab() {
                     </div>
 
                     <div className="text-right">
-                      <span className="inline-flex items-center rounded-md bg-blue-50 px-2.5 py-1 text-[11px] font-bold text-blue-700 ring-1 ring-blue-700/10 ring-inset">
+                      <span className="inline-flex items-center rounded-md bg-brand-green-light px-2.5 py-1 text-[11px] font-bold text-brand-green-dark ring-1 ring-brand-green/20 ring-inset">
                         {item.department}
                       </span>
                     </div>
@@ -268,7 +268,7 @@ export default function VOCAnaTab() {
             {/* 상품구성/양 */}
             <div className="bg-white p-5 rounded-2xl border border-slate-100 space-y-3">
               <div className="flex items-center gap-2">
-                <span className="p-1.5 bg-blue-50 text-blue-600 rounded-lg font-bold text-xs">상품구성/양</span>
+                <span className="p-1.5 bg-brand-green-light text-brand-green-dark rounded-lg font-bold text-xs">상품구성/양</span>
                 <span className="text-[11px] font-bold text-slate-400">수량, 옵션, 구성 문제</span>
               </div>
               <p className="text-xs text-slate-600 leading-relaxed">
@@ -337,7 +337,7 @@ export default function VOCAnaTab() {
                     <p className="text-[11px] text-slate-500 leading-relaxed">생화의 고유 생육 특성 혹은 입고 시기 컨디션 문제로 접근합니다.</p>
                   </div>
                   <div className="bg-slate-50 p-3 rounded-lg border border-slate-100 space-y-1">
-                    <span className="inline-block px-2 py-0.5 bg-blue-50 text-blue-700 text-[10px] font-bold rounded">양, 풍성함, 단수(송이 수), 옵션 차이</span>
+                    <span className="inline-block px-2 py-0.5 bg-brand-green-light text-brand-green-dark text-[10px] font-bold rounded">양, 풍성함, 단수(송이 수), 옵션 차이</span>
                     <p className="text-xs font-bold text-slate-800">상품구성/양 카테고리</p>
                     <p className="text-[11px] text-slate-500 leading-relaxed">상품 판매 스펙(기획 정보) 대비 포장 기획 정량 오차로 판단합니다.</p>
                   </div>
@@ -382,7 +382,7 @@ export default function VOCAnaTab() {
             <div className="bg-white p-5 rounded-2xl border border-slate-100 space-y-3">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-bold text-slate-800">🥀 줄기 휘어짐 / 꺾임 현상</span>
-                <span className="text-[10px] bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded-md font-bold">완충 강화</span>
+                <span className="text-[10px] bg-brand-green-light text-brand-green-dark px-1.5 py-0.5 rounded-md font-bold">완충 강화</span>
               </div>
               <p className="text-xs text-slate-600 leading-relaxed">
                 다양한 품종 전반에서 배송 과정 중 줄기 부러짐이나 고개 축 처짐 현상이 지속 발생하여 비추천 VOC의 큰 비중을 차지하고 있습니다.
