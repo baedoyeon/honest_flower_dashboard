@@ -7,6 +7,7 @@ import { useReviews } from "../context/ReviewsContext";
 export default function ProductStatusTab() {
   const { 
     weeklyReviews: reviewsData, 
+    weeklyIncidents,
     productStats: productStatsData,
     setActiveTab,
     setMetricsProductFilter,
@@ -35,13 +36,19 @@ export default function ProductStatusTab() {
       const recommend = list.filter(r => r.type === "추천").length;
       const neutral = list.filter(r => r.type === "중립").length;
       const notRecommend = list.filter(r => r.type === "비추천").length;
-      const sumRating = list.reduce((sum, r) => sum + r.rating, 0);
-      const avgRating = total > 0 ? Math.round((sumRating / total) * 100) / 100 : 0;
+      
+      const accidentCount = weeklyIncidents.filter(
+        i => (i.product === product || i.product.includes(product) || product.includes(i.product)) && i.incidentStatus === "처리완료"
+      ).length;
+
+      const ratedList = list.filter(r => r.rating > 0);
+      const sumRating = ratedList.reduce((sum, r) => sum + r.rating, 0);
+      const avgRating = ratedList.length > 0 ? Math.round((sumRating / ratedList.length) * 100) / 100 : 0;
       const recommendRate = total > 0 ? Math.round((recommend / total) * 100) : 0;
 
       // Calculate a "Caution Score" to rank products by severity of quality issues
-      // Focus on: non-recommendations (highest weight), low rating, and neutral presence
-      const cautionScore = (notRecommend * 50) + (neutral * 10) + ((5 - avgRating) * 15) + (total * 0.1);
+      // Focus on: non-recommendations, CS accidents, low rating
+      const cautionScore = (notRecommend * 40) + (accidentCount * 50) + (neutral * 10) + ((5 - avgRating) * 15) + (total * 0.1);
 
       return {
         product,
@@ -49,6 +56,7 @@ export default function ProductStatusTab() {
         recommend,
         neutral,
         notRecommend,
+        accidentCount,
         avgRating,
         recommendRate,
         cautionScore,
@@ -56,9 +64,9 @@ export default function ProductStatusTab() {
       };
     });
 
-    // 3. Filter to products with at least some neutral or negative signal OR are generally low rated (< 4.2)
+    // 3. Filter to products with at least some neutral or negative signal or accidents OR are generally low rated (< 4.2)
     const sortedStats = stats
-      .filter(s => s.notRecommend > 0 || s.neutral > 0 || s.avgRating < 4.2)
+      .filter(s => s.notRecommend > 0 || s.accidentCount > 0 || s.neutral > 0 || s.avgRating < 4.2)
       .sort((a, b) => b.cautionScore - a.cautionScore);
 
     // If we have fewer than 3, we append other products sorted by lowest rating
@@ -77,13 +85,14 @@ export default function ProductStatusTab() {
     // Take top 3
     const top3 = finalProducts.slice(0, 3);
 
-    // 4. Map them to caution card structure with dynamically generated tagline and description derived from reviews
+    // 4. Map them to caution card structure with dynamically generated tagline and description derived from reviews & accidents
     return top3.map((item, idx) => {
-      const { product, total, recommend, neutral, notRecommend, avgRating, recommendRate, reviews: productReviews } = item;
+      const { product, total, recommend, neutral, notRecommend, accidentCount, avgRating, recommendRate, reviews: productReviews } = item;
       
-      // Extract specific issues by analyzing review text keywords
+      // Extract specific issues by analyzing review text keywords & accidents
       const negativeReviews = productReviews.filter(r => r.type === "비추천" || r.type === "중립");
-      
+      const accidentReviews = productReviews.filter(r => r.incidentStatus !== undefined || r.accidentType !== undefined || r.refundAmount !== undefined || (r as any).type === "사고접수");
+
       let issues: string[] = [];
       let hasWilt = false;
       let hasBroken = false;
@@ -105,6 +114,19 @@ export default function ProductStatusTab() {
       if (hasPests) issues.push("날파리/해충 유입");
       if (hasVolume) issues.push("풍성함 부족");
       if (hasDelivery) issues.push("배송 지연/포장 손상");
+
+      // Extract accident details
+      const accidentDetailsList: string[] = [];
+      accidentReviews.forEach(r => {
+        const detail = r.accidentDetail || r.accidentType || (r.review && !r.review.startsWith("사고접수") ? r.review : "");
+        if (detail && !accidentDetailsList.includes(detail)) {
+          accidentDetailsList.push(detail);
+        }
+      });
+
+      if (accidentCount > 0) {
+        issues.push(`CS 사고접수 ${accidentCount}건`);
+      }
 
       // Default issue categories based on review category if text matching didn't yield anything
       if (issues.length === 0 && negativeReviews.length > 0) {
@@ -128,8 +150,8 @@ export default function ProductStatusTab() {
 
       // Generate tagline
       const issuesStr = issues.join(" 및 ");
-      const tagline = notRecommend > 0 
-        ? `${issuesStr} 불편 피드백 집중 발생`
+      const tagline = (notRecommend > 0 || accidentCount > 0)
+        ? `${issuesStr} 긴급 점검 필요`
         : neutral > 0
           ? `${issuesStr} 관련 아쉬움 제기`
           : "전반적으로 우수한 평가를 유지 중";
@@ -140,13 +162,16 @@ export default function ProductStatusTab() {
                         productReviews[0]?.review || 
                         "";
       
-      // Generate description
+      // Generate description incorporating accident details
       let desc = "";
-      if (notRecommend > 0 || neutral > 0) {
-        const quotePart = repReview ? `\n\n실제 고객 후기: "${repReview.length > 80 ? repReview.slice(0, 80) + "..." : repReview}"` : "";
-        desc = `이번 분석 기간 중 '${product}' 상품에서 ${issuesStr} 관련 불만이 주로 접수되었습니다. 특히 여름철 고온 다습한 기후 변화에 따른 품질 관리와 완충 포장에 대한 피드백이 두드러집니다. 원인 규명 및 출고 전 검수 방식을 정비하고 즉각 조치할 필요가 있습니다.${quotePart}`;
+      if (notRecommend > 0 || neutral > 0 || accidentCount > 0) {
+        const quotePart = repReview ? `\n\n💬 일반 후기 내용: "${repReview.length > 80 ? repReview.slice(0, 80) + "..." : repReview}"` : "";
+        const accidentPart = accidentCount > 0
+          ? `\n\n🚨 CS 사고접수 상세 (${accidentCount}건): ${accidentDetailsList.length > 0 ? accidentDetailsList.map(d => `[${d.length > 60 ? d.slice(0, 60) + "..." : d}]`).join(" ") : "품질/배송 관련 클레임 접수됨"}`
+          : "";
+        desc = `이번 분석 기간 중 '${product}' 상품에서 ${issuesStr} 관련 피드백이 집중 접수되었습니다. 출고 전 검수 방식을 정비하고 즉각 조치할 필요가 있습니다.${accidentPart}${quotePart}`;
       } else {
-        desc = `'${product}' 상품은 이번 분석 기간 동안 비추천 피드백 없이 균일한 만족도를 기록하고 있습니다. 지속적인 사후 모니터링을 통해 우수한 퀄리티를 유지해 주세요.`;
+        desc = `'${product}' 상품은 이번 분석 기간 동안 비추천 및 사고접수 피드백 없이 균일한 만족도를 기록하고 있습니다. 지속적인 사후 모니터링을 통해 우수한 퀄리티를 유지해 주세요.`;
       }
 
       return {
@@ -159,6 +184,7 @@ export default function ProductStatusTab() {
         recommend,
         neutral,
         notRecommend,
+        accidentCount,
         avgRating,
         recommendRate
       };
@@ -239,7 +265,7 @@ export default function ProductStatusTab() {
               </div>
 
               {/* Product Stats Grid with custom rounded corners */}
-              <div className="mt-5 pt-3.5 border-t border-red-100/60 grid grid-cols-4 text-center gap-1 bg-white/80 rounded-2xl p-2.5 border border-red-100/40">
+              <div className="mt-5 pt-3.5 border-t border-red-100/60 grid grid-cols-5 text-center gap-1 bg-white/80 rounded-2xl p-2.5 border border-red-100/40">
                 <div>
                   <p className="text-[9px] text-slate-400 font-bold uppercase">전체</p>
                   <p className="text-xs font-black text-slate-800">{p.total}건</p>
@@ -265,6 +291,21 @@ export default function ProductStatusTab() {
                     className={`text-xs font-black text-red-600 hover:underline cursor-pointer focus:outline-hidden ${p.notRecommend > 0 ? "" : "opacity-30 pointer-events-none"}`}
                   >
                     {p.notRecommend}건
+                  </button>
+                </div>
+                <div>
+                  <p className="text-[9px] text-purple-600 font-bold uppercase">사고접수</p>
+                  <button 
+                    onClick={() => {
+                      if ((p.accidentCount || 0) > 0) {
+                        setMetricsProductFilter(p.title);
+                        setMetricsTypeFilter("사고접수");
+                        setActiveTab("metrics");
+                      }
+                    }}
+                    className={`text-xs font-black text-purple-700 hover:underline cursor-pointer focus:outline-hidden ${(p.accidentCount || 0) > 0 ? "" : "opacity-30 pointer-events-none"}`}
+                  >
+                    {p.accidentCount || 0}건
                   </button>
                 </div>
               </div>
@@ -338,6 +379,15 @@ export default function ProductStatusTab() {
                 >
                   <div className="flex items-center justify-center gap-1">
                     비추천 <ArrowUpDown className="h-3 w-3" />
+                  </div>
+                </th>
+                <th 
+                  scope="col" 
+                  onClick={() => handleSort("accidentCount" as any)}
+                  className="px-4 py-3.5 text-center text-xs font-semibold text-purple-600 uppercase tracking-wider cursor-pointer hover:bg-purple-50 transition"
+                >
+                  <div className="flex items-center justify-center gap-1">
+                    사고접수 <ArrowUpDown className="h-3 w-3" />
                   </div>
                 </th>
                 <th 
@@ -443,6 +493,24 @@ export default function ProductStatusTab() {
                           {item.notRecommend}건
                         </button>
                       </td>
+                      <td className="whitespace-nowrap px-4 py-4 text-center text-xs text-purple-600 font-semibold">
+                        <button
+                          onClick={() => {
+                            if ((item.accidentCount || 0) > 0) {
+                              setMetricsProductFilter(item.product);
+                              setMetricsTypeFilter("사고접수");
+                              setActiveTab("metrics");
+                            }
+                          }}
+                          className={`px-2 py-1 rounded-md transition-all ${
+                            (item.accidentCount || 0) > 0 
+                              ? "hover:bg-purple-50 hover:underline cursor-pointer text-purple-700 font-bold bg-purple-50/60" 
+                              : "text-slate-300 pointer-events-none"
+                          }`}
+                        >
+                          {item.accidentCount || 0}건
+                        </button>
+                      </td>
                       <td className="whitespace-nowrap px-4 py-4 text-center">
                         <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${
                           isHighRate 
@@ -462,7 +530,7 @@ export default function ProductStatusTab() {
                 })
               ) : (
                 <tr>
-                  <td colSpan={7} className="px-6 py-12 text-center text-xs text-slate-400">
+                  <td colSpan={8} className="px-6 py-12 text-center text-xs text-slate-400">
                     검색 결과에 일치하는 상품이 없습니다.
                   </td>
                 </tr>

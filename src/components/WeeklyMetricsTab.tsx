@@ -7,14 +7,19 @@ import { useState, useMemo } from "react";
 export default function WeeklyMetricsTab() {
   const { 
     weeklyReviews: allWeeklyReviews, 
+    weeklyIncidents,
     archiveActiveReviews, 
     isSyncing, 
     isUsingLocalData,
     metricsProductFilter,
     setMetricsProductFilter,
     metricsTypeFilter: selectedCardFilter,
-    setMetricsTypeFilter: setSelectedCardFilter
+    setMetricsTypeFilter: setSelectedCardFilter,
+    weekFilter,
+    setActiveTab
   } = useReviews();
+
+  const periodLabel = weekFilter === "this" ? "금주" : weekFilter === "last" ? "전주" : "전체기간";
 
   // Precompute group keys mapping for all weekly reviews using high-precision similarity logic
   const groupKeysMap = useMemo(() => getGroupKeysMap(allWeeklyReviews), [allWeeklyReviews]);
@@ -29,6 +34,16 @@ export default function WeeklyMetricsTab() {
     );
   }, [allWeeklyReviews, metricsProductFilter]);
 
+  const matchingIncidents = useMemo(() => {
+    if (!metricsProductFilter) return weeklyIncidents;
+    const pLower = metricsProductFilter.toLowerCase();
+    return weeklyIncidents.filter(i =>
+      i.product.toLowerCase() === pLower ||
+      i.product.toLowerCase().includes(pLower) ||
+      pLower.includes(i.product.toLowerCase())
+    );
+  }, [weeklyIncidents, metricsProductFilter]);
+
   const [searchQuery, setSearchQuery] = useState("");
   const [visibleCount, setVisibleCount] = useState(5);
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
@@ -38,10 +53,14 @@ export default function WeeklyMetricsTab() {
   const recommendCount = reviewsData.filter(r => r.type === "추천").length;
   const neutralCount = reviewsData.filter(r => r.type === "중립").length;
   const notRecommendCount = reviewsData.filter(r => r.type === "비추천").length;
+  const accidentCount = matchingIncidents.length;
 
   const recommendRate = totalCount > 0 ? Math.round((recommendCount / totalCount) * 1000) / 10 : 0;
   const neutralRate = totalCount > 0 ? Math.round((neutralCount / totalCount) * 1000) / 10 : 0;
   const notRecommendRate = totalCount > 0 ? Math.round((notRecommendCount / totalCount) * 1000) / 10 : 0;
+  const accidentRate = totalCount > 0 ? Math.round((accidentCount / totalCount) * 1000) / 10 : 0;
+
+  const [selectedPhotoPreview, setSelectedPhotoPreview] = useState<{ url: string; title: string } | null>(null);
 
   // Comparison logic against national NPS baseline (86.1% recommendation and 4.9% detraction)
   const isRecommendLower = recommendRate < 86.1;
@@ -54,21 +73,51 @@ export default function WeeklyMetricsTab() {
     return [
       {
         name: "추천 (Promoter)",
-        [`금주 사진 후기 (${totalCount}건)`]: recommendRate,
+        [`${periodLabel} 사진 후기 (${totalCount}건)`]: recommendRate,
         "누적 NPS (2.6만건)": 86.1,
       },
       {
         name: "중립 (Passive)",
-        [`금주 사진 후기 (${totalCount}건)`]: neutralRate,
+        [`${periodLabel} 사진 후기 (${totalCount}건)`]: neutralRate,
         "누적 NPS (2.6만건)": 9.0,
       },
       {
         name: "비추천 (Detractor)",
-        [`금주 사진 후기 (${totalCount}건)`]: notRecommendRate,
+        [`${periodLabel} 사진 후기 (${totalCount}건)`]: notRecommendRate,
         "누적 NPS (2.6만건)": 4.9,
       },
     ];
-  }, [totalCount, recommendRate, neutralRate, notRecommendRate]);
+  }, [totalCount, recommendRate, neutralRate, notRecommendRate, periodLabel]);
+
+  // Compute filtered incidents list for the detailed interactive list at the bottom when 사고접수 is selected
+  const filteredIncidents = useMemo(() => {
+    let list = [...matchingIncidents];
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      list = list.filter(i => 
+        (i.claimText && i.claimText.toLowerCase().includes(q)) ||
+        (i.product && i.product.toLowerCase().includes(q)) ||
+        (i.reviewer && i.reviewer.toLowerCase().includes(q)) ||
+        (i.customerName && i.customerName.toLowerCase().includes(q)) ||
+        (i.accidentType && i.accidentType.toLowerCase().includes(q)) ||
+        (i.accidentDetail && i.accidentDetail.toLowerCase().includes(q)) ||
+        (i.id && i.id.toLowerCase().includes(q)) ||
+        (i.orderNumber && i.orderNumber.toLowerCase().includes(q)) ||
+        (i.csResponse && i.csResponse.toLowerCase().includes(q))
+      );
+    }
+
+    list.sort((a, b) => {
+      if (a.date !== b.date) {
+        return sortOrder === "desc" ? b.date.localeCompare(a.date) : a.date.localeCompare(b.date);
+      }
+      const aId = Number(String(a.id).replace(/\D/g, "")) || 0;
+      const bId = Number(String(b.id).replace(/\D/g, "")) || 0;
+      return sortOrder === "desc" ? bId - aId : aId - bId;
+    });
+
+    return list;
+  }, [matchingIncidents, searchQuery, sortOrder]);
 
   // Compute filtered reviews list for the detailed interactive list at the bottom
   const filteredReviews = useMemo(() => {
@@ -234,6 +283,38 @@ export default function WeeklyMetricsTab() {
           tip: `${topCategory} 개선을 최우선 순위 과제로 상정하고 즉각적인 품질 보정제 가동`
         };
       }
+      case "사고접수": {
+        const total = matchingIncidents.length;
+        if (total === 0) {
+          return {
+            title: "사고접수 (CS Claim) 현황",
+            sub: `💡 ${periodLabel} 사고접수/품질 클레임 발생 현황`,
+            boldText: "“현재 분석 범위 내 사고접수 내역이 없습니다.”",
+            desc: "현재 선택된 기간 및 필터 범위 내에서 접수된 CS 사고 및 환불/보상 클레임 내역이 발생하지 않아 안정적인 상태입니다.",
+            tip: "출고 검수 및 배송 패키징 모니터링 지속 유지"
+          };
+        }
+        const approvedCount = matchingIncidents.filter(i => i.incidentStatus === "처리완료").length;
+        const rejectedCount = matchingIncidents.filter(i => i.incidentStatus === "반려됨").length;
+
+        // Breakdown top cause
+        const causeCounts: Record<string, number> = {};
+        matchingIncidents.forEach(i => {
+          const c = i.accidentDetail || i.accidentType || "기타 불만";
+          causeCounts[c] = (causeCounts[c] || 0) + 1;
+        });
+        const sortedCauses = Object.entries(causeCounts).sort((a, b) => b[1] - a[1]);
+        const topCause = sortedCauses[0]?.[0] || "품질 불량";
+        const topCauseCount = sortedCauses[0]?.[1] || 0;
+
+        return {
+          title: "사고접수 (CS Claim) 집중 분석",
+          sub: `💡 ${periodLabel} 사고접수 및 보상 처리 현황`,
+          boldText: `“총 ${total}건 접수 (승인/보상 ${approvedCount}건, 반려 ${rejectedCount}건)”`,
+          desc: `현재 분석 데이터 내 총 ${total}건의 CS 사고접수가 등록되어 있습니다. 최다 발생 원인은 '${topCause}'(${topCauseCount}건)이며, 고객 접수 클레임 원인 분석 및 환불/재배송 조치를 철저히 모니터링해야 합니다.`,
+          tip: `'${topCause}' 관련 출고 검수 기준 강화 및 빠른 고객 소통·보상 진행`
+        };
+      }
       case "all":
       default:
         return {
@@ -244,7 +325,7 @@ export default function WeeklyMetricsTab() {
           tip: "우수 추천 사진을 상품 페이지 및 마케팅 소스로 적극 활용하고, 소수의 불만 사진은 즉각 품질 피드백 루프로 연계"
         };
     }
-  }, [selectedCardFilter, reviewsData]);
+  }, [selectedCardFilter, reviewsData, matchingIncidents, periodLabel]);
 
   return (
     <motion.div
@@ -313,7 +394,7 @@ export default function WeeklyMetricsTab() {
       </div>
 
       {/* Overview Metric Cards */}
-      <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-5">
         {/* Total Card */}
         <button
           onClick={() => setSelectedCardFilter("all")}
@@ -434,6 +515,34 @@ export default function WeeklyMetricsTab() {
             <span className="font-black">
               NPS 평균 대비 {isDetractorHigher ? `+${detractorDiff}` : `-${detractorDiff}`}%p {isDetractorHigher ? "증가" : "감소"}
             </span>
+          </div>
+        </button>
+
+        {/* Accident Receipts Card */}
+        <button
+          onClick={() => setSelectedCardFilter("사고접수")}
+          className={`relative overflow-hidden rounded-3xl p-6 shadow-sm border text-left flex flex-col justify-between transition-all cursor-pointer hover:scale-[1.02] active:scale-95 duration-200 ${
+            selectedCardFilter === "사고접수"
+              ? "bg-purple-700 text-white border-purple-700 shadow-lg shadow-purple-100 ring-4 ring-purple-700/20"
+              : "bg-purple-50/30 text-purple-900 border-purple-100/40 hover:bg-purple-50/60"
+          }`}
+        >
+          <div className="flex items-center justify-between w-full">
+            <div>
+              <p className={`text-[10px] font-black uppercase tracking-wider ${selectedCardFilter === "사고접수" ? "text-purple-200" : "text-purple-600"}`}>
+                사고접수 (CS Issue)
+              </p>
+              <div className="flex items-baseline gap-1.5 mt-2">
+                <h3 className="text-3xl font-black">{accidentCount}</h3>
+                <span className={`text-xs font-bold ${selectedCardFilter === "사고접수" ? "text-purple-200" : "text-purple-600"}`}>{accidentRate}%</span>
+              </div>
+            </div>
+            <div className={`rounded-2xl p-2.5 transition-colors ${selectedCardFilter === "사고접수" ? "bg-white/10 text-white" : "bg-purple-100 text-purple-700"}`}>
+              <AlertTriangle className="h-5 w-5" />
+            </div>
+          </div>
+          <div className={`mt-4 flex items-center gap-1 text-[10px] border-t pt-3 w-full font-bold ${selectedCardFilter === "사고접수" ? "border-white/10 text-purple-200" : "border-purple-100/30 text-purple-600"}`}>
+            <span className="font-bold">품질/배송 CS 접수건 필터</span>
           </div>
         </button>
       </div>
@@ -576,21 +685,23 @@ export default function WeeklyMetricsTab() {
 
       </div>
 
-      {/* Detailed Filtered Review List Section */}
+      {/* Detailed Filtered Review & Incident List Section */}
       <div className="bg-white border border-slate-100 rounded-3xl p-6 shadow-sm space-y-6">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
             <h4 className="text-base font-black text-slate-900 flex items-center gap-2">
               <Sparkles className="h-4 w-4 text-indigo-500" />
               <span>
-                {selectedCardFilter === "all" ? "금주 전체" : `금주 [${selectedCardFilter}]`} 피드백 상세 탐색
+                {selectedCardFilter === "all" ? `${periodLabel} 전체` : `${periodLabel} [${selectedCardFilter}]`} 피드백 상세 탐색
               </span>
               <span className="text-xs bg-slate-100 text-slate-600 px-2.5 py-0.5 rounded-full font-bold">
-                총 {filteredReviews.length}건
+                총 {selectedCardFilter === "사고접수" ? filteredIncidents.length : filteredReviews.length}건
               </span>
             </h4>
             <p className="text-xs text-slate-400 font-medium mt-1">
-              상단 지표 카드를 클릭하여 긍정/중립/부정 의견을 손쉽게 필터링하고 검색할 수 있습니다.
+              {selectedCardFilter === "사고접수" 
+                ? "CS 사고접수 및 보상(환불/재배송) 내역을 탐색하고 고객 클레임 원인을 확인합니다."
+                : "상단 지표 카드를 클릭하여 긍정/중립/부정 의견을 손쉽게 필터링하고 검색할 수 있습니다."}
             </p>
           </div>
 
@@ -600,7 +711,7 @@ export default function WeeklyMetricsTab() {
               <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
               <input
                 type="text"
-                placeholder="상품명, 후기 내용 검색..."
+                placeholder={selectedCardFilter === "사고접수" ? "상품명, 클레임 내용, 고객명 검색..." : "상품명, 후기 내용 검색..."}
                 value={searchQuery}
                 onChange={(e) => {
                   setSearchQuery(e.target.value);
@@ -612,7 +723,7 @@ export default function WeeklyMetricsTab() {
             
             <button
               onClick={() => setSortOrder(prev => prev === "desc" ? "asc" : "desc")}
-              className="inline-flex items-center gap-1.5 px-3 py-2.5 bg-slate-50 hover:bg-slate-100 text-slate-600 hover:text-slate-800 border border-slate-200 rounded-2xl text-xs font-bold transition shrink-0 shadow-sm"
+              className="inline-flex items-center gap-1.5 px-3 py-2.5 bg-slate-50 hover:bg-slate-100 text-slate-600 hover:text-slate-800 border border-slate-200 rounded-2xl text-xs font-bold transition shrink-0 shadow-sm cursor-pointer"
               title={sortOrder === "desc" ? "내림차순 (최신순) - 클릭 시 오름차순 변경" : "오름차순 (과거순) - 클릭 시 내림차순 변경"}
             >
               <ArrowUpDown className="h-3.5 w-3.5 text-slate-500" />
@@ -621,129 +732,301 @@ export default function WeeklyMetricsTab() {
           </div>
         </div>
 
-        {/* Reviews Render */}
-        {filteredReviews.length === 0 ? (
-          <div className="bg-slate-50 rounded-2xl p-10 text-center border border-dashed border-slate-200/60">
-            <p className="text-xs text-slate-400 font-bold">해당 필터 조건에 부합하는 주간 사진 후기가 없습니다.</p>
-          </div>
-        ) : (
+        {/* Incidents Render when 사고접수 is selected */}
+        {selectedCardFilter === "사고접수" ? (
           <div className="space-y-4">
-            <div className="grid grid-cols-1 gap-4">
-              {filteredReviews.slice(0, visibleCount).map((r, index, arr) => {
-                const sentimentTheme = 
-                  r.type === "추천" ? { bg: "bg-brand-green-light text-brand-green-dark border-brand-green/10", label: "추천" } :
-                  r.type === "중립" ? { bg: "bg-amber-50 text-amber-700 border-amber-100", label: "중립" } :
-                  { bg: "bg-red-50 text-red-700 border-red-100", label: "비추천" };
-
-                // Check if this review belongs to the same post (same reviewer, date, and highly similar content) as the previous one
-                const prevItem = index > 0 ? arr[index - 1] : null;
-                const isSamePostAsPrev = prevItem && groupKeysMap.get(r.id) === groupKeysMap.get(prevItem.id);
-
-                return (
-                  <div
-                    key={r.id}
-                    className={`border border-slate-100 bg-white hover:border-slate-200 hover:shadow-xs p-5 rounded-2xl flex flex-col md:flex-row gap-4 items-start justify-between transition-all duration-200 ${
-                      isSamePostAsPrev ? "border-l-4 border-l-brand-green bg-brand-green-light/5 ml-2 md:ml-4" : ""
-                    }`}
-                  >
-                    <div className="space-y-2 flex-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className={`text-[10px] font-black px-2.5 py-0.5 rounded-md border ${sentimentTheme.bg}`}>
-                          {sentimentTheme.label}
-                        </span>
-                        <span className="text-[10px] bg-slate-100 text-slate-700 px-2.5 py-0.5 rounded-md font-bold">
-                          {r.reviewer ? `${r.reviewer}님의 후기` : `고객#${r.id}님의 후기`}
-                        </span>
-                        {isSamePostAsPrev && (
-                          <span className="text-[10px] text-slate-400 font-bold bg-slate-50 border border-slate-100 px-2 py-0.5 rounded-md flex items-center gap-1">
-                            ↳ <span className="text-brand-green-dark">위와 동일한 게시글</span>
-                          </span>
-                        )}
-                        <span className="text-[11px] font-bold text-slate-800">
-                          {r.product}
-                        </span>
-                        {r.image_urls && r.image_urls.length > 0 ? (
-                          <div className="inline-flex gap-1 items-center flex-wrap">
-                            {r.image_urls.map((url, imgIdx) => (
-                              <a 
-                                key={imgIdx}
-                                href={url} 
-                                target="_blank" 
-                                rel="noopener noreferrer"
-                                className="inline-flex items-center justify-center h-5 shrink-0 bg-slate-100 hover:bg-brand-green-light text-slate-500 hover:text-brand-green-dark transition text-[10px] font-bold px-1 py-0.5 rounded border border-slate-200"
-                                title={`사진 후기 ${imgIdx + 1} 보기 (새 창)`}
-                                onClick={(e) => e.stopPropagation()}
-                              >
-                                📷 #{imgIdx + 1}
-                              </a>
-                            ))}
-                          </div>
-                        ) : r.image_url && (
-                          <a 
-                            href={r.image_url} 
-                            target="_blank" 
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center text-xs hover:scale-110 transition shrink-0"
-                            title="사진 후기 보기 (새 창)"
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            📷
-                          </a>
-                        )}
-                        <span className="text-[10px] text-slate-400 font-medium ml-auto md:ml-0">
-                          수령일: {r.date}
-                        </span>
-                      </div>
-                      
-                      <p className="text-xs text-slate-700 leading-relaxed font-medium">
-                        {r.review}
-                      </p>
-
-                      <div className="flex flex-wrap items-center gap-2 pt-1">
-                        <span className="text-[10px] bg-slate-50 text-slate-500 border border-slate-100 px-2 py-0.5 rounded-full font-semibold">
-                          분류: {r.category}
-                        </span>
-                        <span className="text-[10px] bg-indigo-50/50 text-indigo-600 border border-indigo-100/20 px-2 py-0.5 rounded-full font-semibold">
-                          담당 부서: {r.department}
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Star Rating Column */}
-                    <div className="flex items-center gap-1.5 md:flex-col md:items-end justify-center shrink-0 border-t md:border-t-0 border-slate-50 pt-2 md:pt-0 w-full md:w-auto">
-                      <div className="flex gap-0.5">
-                        {Array.from({ length: 5 }).map((_, i) => (
-                          <Star
-                            key={i}
-                            className={`h-3 w-3 ${
-                              i < r.rating ? "text-amber-400 fill-amber-400" : "text-slate-200"
-                            }`}
-                          />
-                        ))}
-                      </div>
-                      <span className="text-[11px] font-black text-slate-700">
-                        {r.rating} / 5
-                      </span>
-                    </div>
-                  </div>
-                );
-              })}
+            <div className="bg-purple-50/80 border border-purple-200 rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
+              <div className="flex items-center gap-2.5 text-purple-900 font-medium">
+                <AlertTriangle className="h-5 w-5 text-purple-600 shrink-0" />
+                <span>
+                  <strong>CS 사고접수 데이터:</strong> 총 <strong>{filteredIncidents.length}건</strong>의 사고접수 내역이 조회되었습니다. (승인 {filteredIncidents.filter(i => i.incidentStatus === "처리완료").length}건 / 반려 {filteredIncidents.filter(i => i.incidentStatus === "반려됨").length}건)
+                </span>
+              </div>
+              <button
+                onClick={() => setActiveTab("incidents")}
+                className="px-4 py-2 bg-purple-700 hover:bg-purple-800 text-white font-bold rounded-xl shrink-0 transition shadow-2xs cursor-pointer flex items-center gap-1.5"
+              >
+                <span>사고접수 허브에서 전체 관리</span>
+                <span>→</span>
+              </button>
             </div>
 
-            {/* Load More Button */}
-            {filteredReviews.length > visibleCount && (
-              <div className="text-center pt-2">
-                <button
-                  onClick={() => setVisibleCount(prev => prev + 5)}
-                  className="inline-flex items-center justify-center bg-slate-100 hover:bg-slate-200/80 text-slate-600 px-5 py-2.5 rounded-2xl text-xs font-black transition cursor-pointer"
-                >
-                  사진 후기 더 보기 ({filteredReviews.length - visibleCount}건 남음)
-                </button>
+            {filteredIncidents.length === 0 ? (
+              <div className="bg-slate-50 rounded-2xl p-10 text-center border border-dashed border-slate-200/60">
+                <p className="text-xs text-slate-400 font-bold">해당 조건에 일치하는 사고접수 데이터가 없습니다.</p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <div className="grid grid-cols-1 gap-4">
+                  {filteredIncidents.slice(0, visibleCount).map((inc) => {
+                    const isApproved = inc.incidentStatus === "처리완료";
+                    const isRejected = inc.incidentStatus === "반려됨";
+
+                    return (
+                      <div
+                        key={inc.id}
+                        className="border border-purple-100 bg-white hover:border-purple-200 hover:shadow-xs p-5 rounded-2xl flex flex-col md:flex-row gap-4 items-start justify-between transition-all duration-200 border-l-4 border-l-purple-500"
+                      >
+                        <div className="space-y-2.5 flex-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="text-[10px] font-black px-2.5 py-0.5 rounded-md border bg-purple-100 text-purple-800 border-purple-200">
+                              🚨 사고접수
+                            </span>
+                            <span className={`text-[10px] font-black px-2.5 py-0.5 rounded-md border ${
+                              isApproved ? "bg-emerald-50 text-emerald-700 border-emerald-200" :
+                              isRejected ? "bg-slate-100 text-slate-700 border-slate-200" :
+                              "bg-amber-50 text-amber-700 border-amber-200"
+                            }`}>
+                              {isApproved ? "처리완료 (승인/보상)" : isRejected ? "반려됨 (생화특성)" : "접수중"}
+                            </span>
+                            <span className="text-[10px] bg-slate-100 text-slate-700 px-2 py-0.5 rounded-md font-bold">
+                              {inc.reviewer || inc.customerName ? `${inc.reviewer || inc.customerName} 고객님` : `티켓 #${inc.id}`}
+                            </span>
+                            <span className="text-[11px] font-bold text-slate-800">
+                              {inc.product}
+                            </span>
+                            {inc.id && (
+                              <span className="text-[10px] text-slate-400 font-mono">
+                                [{inc.id}]
+                              </span>
+                            )}
+                            <span className="text-[10px] text-slate-400 font-medium ml-auto md:ml-0">
+                              접수일: {inc.date}
+                            </span>
+                          </div>
+
+                          <div className="bg-slate-50/80 rounded-xl p-3.5 border border-slate-100">
+                            <p className="text-xs text-slate-800 leading-relaxed font-medium">
+                              "{inc.claimText}"
+                            </p>
+                          </div>
+
+                          {inc.csResponse && (
+                            <div className="bg-blue-50/50 rounded-xl p-3 border border-blue-100 text-xs text-blue-900">
+                              <span className="font-bold text-blue-700 mr-1.5">💬 CS 조치 답변:</span>
+                              <span>{inc.csResponse}</span>
+                            </div>
+                          )}
+
+                          <div className="flex flex-wrap items-center gap-2 pt-1">
+                            <span className="text-[10px] bg-purple-50 text-purple-700 border border-purple-100 px-2.5 py-0.5 rounded-full font-bold">
+                              원인: {inc.accidentDetail || inc.accidentType || "품질 불량"}
+                            </span>
+                            {inc.refundAmount !== undefined && inc.refundAmount > 0 && (
+                              <span className="text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-200 px-2.5 py-0.5 rounded-full font-extrabold">
+                                💰 환불: {inc.refundAmount.toLocaleString()}원
+                              </span>
+                            )}
+                            {inc.orderNumber && (
+                              <span className="text-[10px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full font-mono">
+                                주문: {inc.orderNumber}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Photo Thumbnail if present */}
+                        {inc.image_url && (
+                          <div className="shrink-0 pt-2 md:pt-0">
+                            <button
+                              onClick={() => setSelectedPhotoPreview({ url: inc.image_url!, title: `${inc.product} (${inc.reviewer || inc.customerName || "고객"} 사고접수 증빙)` })}
+                              className="group relative block overflow-hidden rounded-xl border border-slate-200 shadow-xs hover:shadow-md transition cursor-pointer"
+                              title="증빙 사진 확대 보기"
+                            >
+                              <img
+                                src={inc.image_url}
+                                alt="사고 증빙 사진"
+                                className="h-20 w-20 object-cover group-hover:scale-105 transition duration-200"
+                                referrerPolicy="no-referrer"
+                              />
+                              <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition flex items-center justify-center text-white text-[10px] font-bold">
+                                🔍 확대
+                              </div>
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Load More Button for Incidents */}
+                {filteredIncidents.length > visibleCount && (
+                  <div className="text-center pt-2">
+                    <button
+                      onClick={() => setVisibleCount(prev => prev + 5)}
+                      className="inline-flex items-center justify-center bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 px-5 py-2.5 rounded-2xl text-xs font-black transition cursor-pointer"
+                    >
+                      사고접수 내역 더 보기 ({filteredIncidents.length - visibleCount}건 남음)
+                    </button>
+                  </div>
+                )}
               </div>
             )}
           </div>
+        ) : (
+          /* Standard Photo Reviews Render */
+          filteredReviews.length === 0 ? (
+            <div className="bg-slate-50 rounded-2xl p-10 text-center border border-dashed border-slate-200/60">
+              <p className="text-xs text-slate-400 font-bold">해당 필터 조건에 부합하는 주간 사진 후기가 없습니다.</p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 gap-4">
+                {filteredReviews.slice(0, visibleCount).map((r, index, arr) => {
+                  const sentimentTheme = 
+                    r.type === "추천" ? { bg: "bg-brand-green-light text-brand-green-dark border-brand-green/10", label: "추천" } :
+                    r.type === "중립" ? { bg: "bg-amber-50 text-amber-700 border-amber-100", label: "중립" } :
+                    { bg: "bg-red-50 text-red-700 border-red-100", label: "비추천" };
+
+                  // Check if this review belongs to the same post (same reviewer, date, and highly similar content) as the previous one
+                  const prevItem = index > 0 ? arr[index - 1] : null;
+                  const isSamePostAsPrev = prevItem && groupKeysMap.get(r.id) === groupKeysMap.get(prevItem.id);
+
+                  return (
+                    <div
+                      key={r.id}
+                      className={`border border-slate-100 bg-white hover:border-slate-200 hover:shadow-xs p-5 rounded-2xl flex flex-col md:flex-row gap-4 items-start justify-between transition-all duration-200 ${
+                        isSamePostAsPrev ? "border-l-4 border-l-brand-green bg-brand-green-light/5 ml-2 md:ml-4" : ""
+                      }`}
+                    >
+                      <div className="space-y-2 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className={`text-[10px] font-black px-2.5 py-0.5 rounded-md border ${sentimentTheme.bg}`}>
+                            {sentimentTheme.label}
+                          </span>
+                          <span className="text-[10px] bg-slate-100 text-slate-700 px-2.5 py-0.5 rounded-md font-bold">
+                            {r.reviewer ? `${r.reviewer}님의 후기` : `고객#${r.id}님의 후기`}
+                          </span>
+                          {isSamePostAsPrev && (
+                            <span className="text-[10px] text-slate-400 font-bold bg-slate-50 border border-slate-100 px-2 py-0.5 rounded-md flex items-center gap-1">
+                              ↳ <span className="text-brand-green-dark">위와 동일한 게시글</span>
+                            </span>
+                          )}
+                          <span className="text-[11px] font-bold text-slate-800">
+                            {r.product}
+                          </span>
+                          {r.image_urls && r.image_urls.length > 0 ? (
+                            <div className="inline-flex gap-1 items-center flex-wrap">
+                              {r.image_urls.map((url, imgIdx) => (
+                                <button
+                                  key={imgIdx}
+                                  onClick={() => setSelectedPhotoPreview({ url, title: `${r.product} (${r.reviewer || `고객#${r.id}`} 사진 후기 #${imgIdx + 1})` })}
+                                  className="inline-flex items-center justify-center h-5 shrink-0 bg-slate-100 hover:bg-brand-green-light text-slate-500 hover:text-brand-green-dark transition text-[10px] font-bold px-1.5 py-0.5 rounded border border-slate-200 cursor-pointer"
+                                  title={`사진 후기 ${imgIdx + 1} 미리보기`}
+                                >
+                                  📷 #{imgIdx + 1}
+                                </button>
+                              ))}
+                            </div>
+                          ) : r.image_url && (
+                            <button
+                              onClick={() => setSelectedPhotoPreview({ url: r.image_url!, title: `${r.product} (${r.reviewer || `고객#${r.id}`} 사진 후기)` })}
+                              className="inline-flex items-center text-xs hover:scale-110 transition shrink-0 cursor-pointer"
+                              title="사진 후기 미리보기"
+                            >
+                              📷
+                            </button>
+                          )}
+                          <span className="text-[10px] text-slate-400 font-medium ml-auto md:ml-0">
+                            수령일: {r.date}
+                          </span>
+                        </div>
+                        
+                        <p className="text-xs text-slate-700 leading-relaxed font-medium">
+                          {r.review}
+                        </p>
+
+                        <div className="flex flex-wrap items-center gap-2 pt-1">
+                          <span className="text-[10px] bg-slate-50 text-slate-500 border border-slate-100 px-2 py-0.5 rounded-full font-semibold">
+                            분류: {r.category}
+                          </span>
+                          <span className="text-[10px] bg-indigo-50/50 text-indigo-600 border border-indigo-100/20 px-2 py-0.5 rounded-full font-semibold">
+                            담당 부서: {r.department}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Star Rating Column */}
+                      <div className="flex items-center gap-1.5 md:flex-col md:items-end justify-center shrink-0 border-t md:border-t-0 border-slate-50 pt-2 md:pt-0 w-full md:w-auto">
+                        <div className="flex gap-0.5">
+                          {Array.from({ length: 5 }).map((_, i) => (
+                            <Star
+                              key={i}
+                              className={`h-3 w-3 ${
+                                i < r.rating ? "text-amber-400 fill-amber-400" : "text-slate-200"
+                              }`}
+                            />
+                          ))}
+                        </div>
+                        <span className="text-[11px] font-black text-slate-700">
+                          {r.rating} / 5
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Load More Button */}
+              {filteredReviews.length > visibleCount && (
+                <div className="text-center pt-2">
+                  <button
+                    onClick={() => setVisibleCount(prev => prev + 5)}
+                    className="inline-flex items-center justify-center bg-slate-100 hover:bg-slate-200/80 text-slate-600 px-5 py-2.5 rounded-2xl text-xs font-black transition cursor-pointer"
+                  >
+                    사진 후기 더 보기 ({filteredReviews.length - visibleCount}건 남음)
+                  </button>
+                </div>
+              )}
+            </div>
+          )
         )}
       </div>
+
+      {/* Photo Preview Modal */}
+      <AnimatePresence>
+        {selectedPhotoPreview && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-xs">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white rounded-3xl max-w-2xl w-full overflow-hidden shadow-2xl border border-slate-100"
+            >
+              <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-slate-50/50">
+                <h3 className="text-xs font-bold text-slate-800 truncate pr-4">
+                  {selectedPhotoPreview.title}
+                </h3>
+                <button
+                  onClick={() => setSelectedPhotoPreview(null)}
+                  className="p-1 rounded-full text-slate-400 hover:text-slate-700 hover:bg-slate-200 transition cursor-pointer"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+              <div className="p-6 flex justify-center bg-slate-900/5 max-h-[70vh] overflow-auto">
+                <img
+                  src={selectedPhotoPreview.url}
+                  alt={selectedPhotoPreview.title}
+                  className="max-h-[60vh] max-w-full rounded-xl object-contain shadow-md"
+                  referrerPolicy="no-referrer"
+                />
+              </div>
+              <div className="px-6 py-3 bg-slate-50 border-t border-slate-100 flex justify-end">
+                <a
+                  href={selectedPhotoPreview.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xs text-brand-green hover:underline font-bold"
+                >
+                  새 창에서 원본 보기 ↗
+                </a>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 }

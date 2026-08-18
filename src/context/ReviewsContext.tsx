@@ -2,10 +2,13 @@ import React, { createContext, useContext, useState, useEffect, useMemo } from "
 import { db } from "../lib/firebase";
 import { collection, onSnapshot, doc, writeBatch, query, orderBy, addDoc, limit, getDocs } from "firebase/firestore";
 import { reviewsData as staticReviews, Review, ProductStat } from "../data/classifiedReviews";
+import { Incident, initialIncidentsData } from "../data/initialIncidents";
 
 interface ReviewsContextType {
   reviews: Review[];
   weeklyReviews: Review[];
+  incidents: Incident[];
+  weeklyIncidents: Incident[];
   productStats: ProductStat[];
   isLoading: boolean;
   isFirestoreEmpty: boolean;
@@ -21,12 +24,15 @@ interface ReviewsContextType {
     lastWeek: { start: string; end: string; label: string };
   };
   refreshData: () => Promise<void>;
-  activeTab: "metrics" | "products" | "voc" | "archive";
-  setActiveTab: (tab: "metrics" | "products" | "voc" | "archive") => void;
+  resetToInitialData: () => Promise<void>;
+  activeTab: "metrics" | "products" | "incidents" | "voc" | "archive";
+  setActiveTab: (tab: "metrics" | "products" | "incidents" | "voc" | "archive") => void;
   metricsProductFilter: string;
   setMetricsProductFilter: (p: string) => void;
-  metricsTypeFilter: "all" | "추천" | "중립" | "비추천";
-  setMetricsTypeFilter: (t: "all" | "추천" | "중립" | "비추천") => void;
+  metricsTypeFilter: "all" | "추천" | "중립" | "비추천" | "사고접수";
+  setMetricsTypeFilter: (t: "all" | "추천" | "중립" | "비추천" | "사고접수") => void;
+  importParsedReviews: (newReviews: Review[], append?: boolean) => Promise<void>;
+  importIncidents: (newIncidents: Incident[], replace?: boolean) => Promise<void>;
 }
 
 const ReviewsContext = createContext<ReviewsContextType | undefined>(undefined);
@@ -112,6 +118,51 @@ const MASKED_NAMES = [
   "오*지", "서*훈", "신*연", "권*재", "황*우", "송*은", "안*진", "임*혁", "전*하", "홍*윤"
 ];
 
+// Helper: Remove undefined properties from an object before writing to Firestore
+export function sanitizeForFirestore<T extends Record<string, any>>(obj: T): Record<string, any> {
+  const clean: Record<string, any> = {};
+  Object.keys(obj).forEach(key => {
+    const val = obj[key];
+    if (val !== undefined) {
+      if (Array.isArray(val)) {
+        clean[key] = val.filter(v => v !== undefined);
+      } else if (val !== null && typeof val === "object" && !(val instanceof Date)) {
+        clean[key] = sanitizeForFirestore(val);
+      } else {
+        clean[key] = val;
+      }
+    }
+  });
+  return clean;
+}
+
+enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: Record<string, any>;
+}
+
+function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {},
+    operationType,
+    path
+  };
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  throw new Error(JSON.stringify(errInfo));
+}
+
 // Helper: Ensure a name is masked to 'X*Y' format or assign a consistent masked name
 export function getMaskedName(id: number, rawName?: string): string {
   if (rawName && rawName.trim()) {
@@ -124,39 +175,114 @@ export function getMaskedName(id: number, rawName?: string): string {
   return MASKED_NAMES[id % MASKED_NAMES.length];
 }
 
-// Helper: Determine if two reviews belong to the same post (strictly same reviewer and same date)
+// Helper: Determine if two reviews belong to the same post
 export function areReviewsSamePost(a: any, b: any): boolean {
   if (!a || !b) return false;
+  if (a.id === b.id) return true;
   
-  // Same reviewer (rawName or masked name)
-  const aReviewer = a.rawReviewer || a.reviewer || `고객#${a.id}`;
-  const bReviewer = b.rawReviewer || b.reviewer || `고객#${b.id}`;
-  if (aReviewer !== bReviewer) return false;
+  const aText = (a.review || "").trim();
+  const bText = (b.review || "").trim();
 
-  // Same date
-  if (a.date !== b.date) return false;
+  // If both have explicit rawReviewer strings AND same date AND same non-empty review text:
+  if (a.rawReviewer && b.rawReviewer && a.rawReviewer === b.rawReviewer && a.date === b.date && aText.length >= 3 && aText === bText) {
+    return true;
+  }
 
-  return true;
+  // If same date and exact same long review text (multi-product order submission with same text):
+  if (a.date === b.date && aText.length >= 8 && aText === bText) {
+    return true;
+  }
+
+  return false;
 }
 
-// Helper: Deduplicate reviews of the same product by the same person on the same day (duplicate photo uploads)
+// Helper: Smart deduplication for Incidents (Merge duplicate rows by exact Incident ID or exact duplicate CSV records)
+export function getDeduplicatedIncidents(list: Incident[]): Incident[] {
+  const incidents: Incident[] = [];
+
+  list.forEach(item => {
+    const existingIndex = incidents.findIndex(existing => {
+      // 1. Match by exact incident ID or numeric ID (e.g. INC-9301 vs 9301)
+      if (existing.id && item.id) {
+        const exNum = existing.id.replace(/\D/g, "");
+        const itNum = item.id.replace(/\D/g, "");
+        if (exNum && itNum && exNum === itNum) {
+          return true;
+        }
+        if (existing.id === item.id) {
+          return true;
+        }
+      }
+      
+      // 2. Match exact duplicate row if orderNumber, product, date, and customer match identically
+      if (
+        existing.orderNumber &&
+        item.orderNumber &&
+        existing.orderNumber === item.orderNumber &&
+        existing.product === item.product &&
+        existing.date === item.date &&
+        (existing.customerName || "") === (item.customerName || "")
+      ) {
+        return true;
+      }
+
+      return false;
+    });
+
+    if (existingIndex !== -1) {
+      // Merge enriched details into existing record
+      const existing = incidents[existingIndex];
+      if (item.refundAmount && !existing.refundAmount) existing.refundAmount = item.refundAmount;
+      if (item.image_url && !existing.image_url) existing.image_url = item.image_url;
+      if (item.csResponse && !existing.csResponse) existing.csResponse = item.csResponse;
+      if (item.orderNumber && !existing.orderNumber) existing.orderNumber = item.orderNumber;
+      if (item.claimText && item.claimText.length > (existing.claimText?.length || 0)) {
+        existing.claimText = item.claimText;
+      }
+      if (item.incidentStatus === "처리완료" || (item.incidentStatus === "반려됨" && existing.incidentStatus === "접수중")) {
+        existing.incidentStatus = item.incidentStatus;
+      }
+    } else {
+      incidents.push({ ...item });
+    }
+  });
+
+  return incidents;
+}
+
+// Helper: Deduplicate reviews of the same product by the same person or with identical content on the same day
 export function getDeduplicatedReviews(list: Review[]): Review[] {
   const merged: Review[] = [];
   
   list.forEach(item => {
+    const isAccident = item.incidentStatus !== undefined || item.accidentType !== undefined || item.refundAmount !== undefined;
     const itemReviewer = item.rawReviewer || item.reviewer || `고객#${item.id}`;
+    const itemText = (item.review || "").trim();
     
     const existing = merged.find(m => {
+      // Distinct IDs are separate database/CSV rows
+      if (m.id && item.id && m.id !== item.id) return false;
+      // Accident reports are individual CS tickets
+      if (isAccident) return false;
+
       const mReviewer = m.rawReviewer || m.reviewer || `고객#${m.id}`;
-      return (
-        mReviewer === itemReviewer &&
-        m.date === item.date &&
-        m.product === item.product &&
-        (m.review || "").trim() === (item.review || "").trim()
-      );
+      const mText = (m.review || "").trim();
+      
+      const sameReviewer = item.rawReviewer && m.rawReviewer && mReviewer === itemReviewer && m.date === item.date && m.product === item.product && mText === itemText;
+      const sameContentIntegrity = itemText.length >= 8 && mText === itemText && m.date === item.date && m.product === item.product;
+
+      return Boolean(sameReviewer || sameContentIntegrity);
     });
     
     if (existing) {
+      if (!existing.rawReviewer && item.rawReviewer) {
+        existing.rawReviewer = item.rawReviewer;
+        existing.reviewer = item.reviewer;
+      }
+      if (item.incidentStatus && !existing.incidentStatus) existing.incidentStatus = item.incidentStatus;
+      if (item.accidentType && !existing.accidentType) existing.accidentType = item.accidentType;
+      if (item.accidentDetail && !existing.accidentDetail) existing.accidentDetail = item.accidentDetail;
+      if (item.refundAmount !== undefined && existing.refundAmount === undefined) existing.refundAmount = item.refundAmount;
       if (item.image_url) {
         if (!existing.image_urls) {
           existing.image_urls = existing.image_url ? [existing.image_url] : [];
@@ -168,12 +294,55 @@ export function getDeduplicatedReviews(list: Review[]): Review[] {
     } else {
       merged.push({
         ...item,
-        image_urls: item.image_url ? [item.image_url] : []
+        reviewer: item.reviewer || getMaskedName(item.id, item.rawReviewer),
+        image_urls: item.image_urls || (item.image_url ? [item.image_url] : [])
       });
     }
   });
   
   return merged;
+}
+
+export interface IntegrityIssue {
+  type: "IDENTICAL_CONTENT_DIFFERENT_REVIEWER" | "DUPLICATE_ROW";
+  date: string;
+  product: string;
+  reviewText: string;
+  reviews: Review[];
+  suggestedReviewer: string;
+}
+
+// Helper: Detect integrity issues (identical review content across different reviewers or duplicated rows)
+export function findIntegrityIssues(list: Review[]): IntegrityIssue[] {
+  const issues: IntegrityIssue[] = [];
+  const groups = new Map<string, Review[]>();
+
+  list.forEach(r => {
+    const text = (r.review || "").trim();
+    if (text.length < 3) return;
+    const key = `${r.date}___${r.product}___${text}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key)!.push(r);
+  });
+
+  groups.forEach((items) => {
+    if (items.length > 1) {
+      const reviewers = new Set(items.map(i => i.rawReviewer || i.reviewer || getMaskedName(i.id)));
+      const first = items[0];
+      const suggested = items.find(i => i.rawReviewer)?.rawReviewer || items.find(i => i.reviewer)?.reviewer || getMaskedName(first.id, first.rawReviewer);
+      
+      issues.push({
+        type: reviewers.size > 1 ? "IDENTICAL_CONTENT_DIFFERENT_REVIEWER" : "DUPLICATE_ROW",
+        date: first.date,
+        product: first.product,
+        reviewText: first.review,
+        reviews: items,
+        suggestedReviewer: suggested
+      });
+    }
+  });
+
+  return issues;
 }
 
 // Helper: Dynamically generate group keys for a list of reviews
@@ -395,6 +564,11 @@ function parseFirestoreReview(docId: string, data: any, fallbackId: number): Rev
     image_url
   };
 
+  if (data.incidentStatus !== undefined) parsedReview.incidentStatus = data.incidentStatus;
+  if (data.accidentType !== undefined) parsedReview.accidentType = data.accidentType;
+  if (data.accidentDetail !== undefined) parsedReview.accidentDetail = data.accidentDetail;
+  if (data.refundAmount !== undefined) parsedReview.refundAmount = Number(data.refundAmount);
+
   console.log(`[DEBUG] Parsed review ID ${id}:`, parsedReview);
 
   return parsedReview;
@@ -414,62 +588,41 @@ const mapStaticReviews = (list: Review[]): Review[] => {
 
 export function ReviewsProvider({ children }: { children: React.ReactNode }) {
   const [rawReviews, setRawReviews] = useState<Review[]>(() => mapStaticReviews(staticReviews));
+  const [rawIncidents, setRawIncidents] = useState<Incident[]>(() => initialIncidentsData);
   
   // Dynamically compute deduplicated and image-merged reviews list for all metrics and components
   const reviews = useMemo(() => getDeduplicatedReviews(rawReviews), [rawReviews]);
+
+  // Dynamically compute deduplicated incidents list for all metrics and components
+  const incidents = useMemo(() => getDeduplicatedIncidents(rawIncidents), [rawIncidents]);
 
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isFirestoreEmpty, setIsFirestoreEmpty] = useState<boolean>(false);
   const [isUsingLocalData, setIsUsingLocalData] = useState<boolean>(true);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [weekFilter, setWeekFilter] = useState<"this" | "last" | "all">("all");
-  const [activeTab, setActiveTab] = useState<"metrics" | "products" | "voc" | "archive">("metrics");
+  const [activeTab, setActiveTab] = useState<"metrics" | "products" | "incidents" | "voc" | "archive">("metrics");
   const [metricsProductFilter, setMetricsProductFilter] = useState<string>("");
-  const [metricsTypeFilter, setMetricsTypeFilter] = useState<"all" | "추천" | "중립" | "비추천">("all");
+  const [metricsTypeFilter, setMetricsTypeFilter] = useState<"all" | "추천" | "중립" | "비추천" | "사고접수">("all");
 
   const weekRanges = useMemo(() => {
     const activeReviews = reviews.filter(r => !r.archived);
+    const allDates: string[] = [
+      ...activeReviews.map(r => r.date).filter(Boolean),
+      ...incidents.map(i => i.date).filter(Boolean)
+    ];
     let anchor = getKSTDate();
-    let isDefaultDemo = false;
     
-    if (activeReviews.length > 0) {
-      const dates = activeReviews.map(r => r.date).filter(Boolean);
-      if (dates.length > 0) {
-        dates.sort();
-        const maxDateStr = dates[dates.length - 1];
-        const minDateStr = dates[0];
-        
-        // If the active reviews match our default static dataset range (2026.06.18 ~ 2026.07.01)
-        if (maxDateStr === "2026.07.01" && minDateStr === "2026.06.18") {
-          isDefaultDemo = true;
-        }
-        
-        const [y, m, d] = maxDateStr.split(".").map(Number);
-        if (!isNaN(y) && !isNaN(m) && !isNaN(d)) {
-          anchor = new Date(y, m - 1, d);
-        }
+    if (allDates.length > 0) {
+      allDates.sort();
+      const maxDateStr = allDates[allDates.length - 1];
+      const [y, m, d] = maxDateStr.split(".").map(Number);
+      if (!isNaN(y) && !isNaN(m) && !isNaN(d)) {
+        anchor = new Date(y, m - 1, d);
       }
     }
 
-    if (isDefaultDemo) {
-      // For the default static dataset, use a balanced, highly distinct split
-      // This Week: 2026.06.25 ~ 2026.07.01 (48 reviews, including manual overrides)
-      // Last Week: 2026.06.18 ~ 2026.06.24 (152 reviews)
-      return {
-        thisWeek: {
-          start: "2026.06.25",
-          end: "2026.07.01",
-          label: "이번주 (06.25 ~ 07.01)"
-        },
-        lastWeek: {
-          start: "2026.06.18",
-          end: "2026.06.24",
-          label: "저번주 (06.18 ~ 06.24)"
-        }
-      };
-    }
-
-    const day = anchor.getDay(); // 0 is Sun, 1 is Mon, ..., 6 is Sat
+    const day = anchor.getDay(); // 0 is Sun, 1 is Mon, ..., 5 is Fri, 6 is Sat
     
     // Calculate difference to Saturday of the current reporting cycle (Saturday ~ Friday)
     const diffToSaturday = day === 6 ? 0 : -(day + 1);
@@ -500,59 +653,14 @@ export function ReviewsProvider({ children }: { children: React.ReactNode }) {
         label: `저번주 (${formatKSTDate(lastWeekSat).slice(5)} ~ ${formatKSTDate(lastWeekFri).slice(5)})`
       }
     };
-  }, [reviews]);
+  }, [reviews, incidents]);
+
+  const isUsingLocalDataRef = React.useRef(true);
 
   useEffect(() => {
-    // Listen to firestore reviews collection (up to 1000 reviews for scalability)
-    // We query without orderBy("id") to support documents that may not have an "id" field in Firestore,
-    // and instead sort resiliently in-memory by date and id!
-    const reviewsCollection = collection(db, "reviews");
-    const reviewsQuery = query(reviewsCollection, limit(1000));
-
-    const unsubscribe = onSnapshot(reviewsQuery, 
-      (snapshot) => {
-        if (snapshot.empty) {
-          console.log("Firestore reviews collection is empty. Falling back to local data.");
-          setIsFirestoreEmpty(true);
-          setIsUsingLocalData(true);
-          setRawReviews(mapStaticReviews(staticReviews)); // fallback
-          setIsLoading(false);
-        } else {
-          const list: Review[] = [];
-          let indexCounter = 10000;
-          snapshot.forEach((doc) => {
-            const data = doc.data();
-            // Skip non-review testing or metadata documents to maintain data integrity
-            if (doc.id === "test_connection" || (!data.review && !data.product && !data.rating)) {
-              console.log("Skipping non-review document:", doc.id, data);
-              return;
-            }
-            console.log("Fetched raw doc:", doc.id, data);
-            list.push(parseFirestoreReview(doc.id, data, indexCounter++));
-          });
-          // Sort descending: by date first, then by id to ensure proper chronological order
-          list.sort((a, b) => {
-            if (b.date !== a.date) {
-              return b.date.localeCompare(a.date);
-            }
-            return b.id - a.id;
-          });
-          console.log("Loaded parsed reviews count:", list.length, "First few:", list.slice(0, 3));
-          setRawReviews(list);
-          setIsFirestoreEmpty(false);
-          setIsUsingLocalData(false);
-          setIsLoading(false);
-        }
-      },
-      (error) => {
-        console.error("Firestore loading error, falling back to local data:", error);
-        setIsUsingLocalData(true);
-        setRawReviews(mapStaticReviews(staticReviews));
-        setIsLoading(false);
-      }
-    );
-
-    return () => unsubscribe();
+    // Default to clean local static reviews (200 reviews)
+    setRawReviews(mapStaticReviews(staticReviews));
+    setIsLoading(false);
   }, []);
 
   // Compute active weekly reviews dynamically from the main list with date boundaries!
@@ -561,13 +669,7 @@ export function ReviewsProvider({ children }: { children: React.ReactNode }) {
     const active = reviews.filter(r => r.archived !== true);
     
     if (weekFilter === "all") {
-      const thisRange = weekRanges.thisWeek;
-      const lastRange = weekRanges.lastWeek;
-      return active.filter(r => {
-        const inThisWeek = r.date >= thisRange.start && r.date <= thisRange.end;
-        const inLastWeek = r.date >= lastRange.start && r.date <= lastRange.end;
-        return inThisWeek || inLastWeek;
-      });
+      return active;
     }
     
     const range = weekFilter === "this" ? weekRanges.thisWeek : weekRanges.lastWeek;
@@ -578,31 +680,55 @@ export function ReviewsProvider({ children }: { children: React.ReactNode }) {
     });
   }, [reviews, weekFilter, weekRanges]);
 
-  // Compute product statistics dynamically from active weeklyReviews!
+  // Compute active weekly incidents dynamically with date boundaries
+  const weeklyIncidents = useMemo(() => {
+    if (weekFilter === "all") {
+      return incidents;
+    }
+    const range = weekFilter === "this" ? weekRanges.thisWeek : weekRanges.lastWeek;
+    return incidents.filter(i => i.date >= range.start && i.date <= range.end);
+  }, [incidents, weekFilter, weekRanges]);
+
+  // Compute product statistics dynamically from active weeklyReviews & weeklyIncidents!
   const productStats = useMemo(() => {
     const map = new Map<string, {
       totalCount: number;
+      ratedCount: number;
       sumRating: number;
       recommend: number;
       neutral: number;
       notRecommend: number;
+      accidentCount: number;
     }>();
 
     weeklyReviews.forEach(r => {
       if (!map.has(r.product)) {
-        map.set(r.product, { totalCount: 0, sumRating: 0, recommend: 0, neutral: 0, notRecommend: 0 });
+        map.set(r.product, { totalCount: 0, ratedCount: 0, sumRating: 0, recommend: 0, neutral: 0, notRecommend: 0, accidentCount: 0 });
       }
       const val = map.get(r.product)!;
       val.totalCount++;
-      val.sumRating += r.rating;
+      if (r.rating > 0) {
+        val.ratedCount++;
+        val.sumRating += r.rating;
+      }
       if (r.type === "추천") val.recommend++;
       else if (r.type === "중립") val.neutral++;
-      else val.notRecommend++;
+      else if (r.type === "비추천") val.notRecommend++;
+    });
+
+    // Count incidents per product from independent weeklyIncidents data
+    weeklyIncidents.forEach(inc => {
+      if (inc.incidentStatus === "처리완료") {
+        if (!map.has(inc.product)) {
+          map.set(inc.product, { totalCount: 0, ratedCount: 0, sumRating: 0, recommend: 0, neutral: 0, notRecommend: 0, accidentCount: 0 });
+        }
+        map.get(inc.product)!.accidentCount++;
+      }
     });
 
     const statsList: ProductStat[] = [];
     map.forEach((val, product) => {
-      const avgRating = val.totalCount > 0 ? Math.round((val.sumRating / val.totalCount) * 100) / 100 : 0;
+      const avgRating = val.ratedCount > 0 ? Math.round((val.sumRating / val.ratedCount) * 100) / 100 : 0;
       const recommendRate = val.totalCount > 0 ? Math.round((val.recommend / val.totalCount) * 100) : 0;
       statsList.push({
         product,
@@ -611,25 +737,29 @@ export function ReviewsProvider({ children }: { children: React.ReactNode }) {
         recommend: val.recommend,
         neutral: val.neutral,
         notRecommend: val.notRecommend,
+        accidentCount: val.accidentCount,
         recommendRate
       });
     });
 
     // Sort by totalCount descending by default
     return statsList.sort((a, b) => b.totalCount - a.totalCount);
-  }, [weeklyReviews]);
+  }, [weeklyReviews, weeklyIncidents]);
 
   // Sync / seed initial reviews to Firestore
   const syncWithFirestore = async () => {
     setIsSyncing(true);
     try {
-      const batch = writeBatch(db);
-      staticReviews.forEach((item) => {
-        // Set document with id as key
-        const docRef = doc(db, "reviews", item.id.toString());
-        batch.set(docRef, item);
-      });
-      await batch.commit();
+      const BATCH_SIZE = 400;
+      for (let i = 0; i < staticReviews.length; i += BATCH_SIZE) {
+        const chunk = staticReviews.slice(i, i + BATCH_SIZE);
+        const batch = writeBatch(db);
+        chunk.forEach((item) => {
+          const docRef = doc(db, "reviews", item.id.toString());
+          batch.set(docRef, sanitizeForFirestore(item));
+        });
+        await batch.commit();
+      }
       setIsFirestoreEmpty(false);
       setIsUsingLocalData(false);
     } catch (err) {
@@ -650,12 +780,16 @@ export function ReviewsProvider({ children }: { children: React.ReactNode }) {
         return;
       }
       
-      const batch = writeBatch(db);
-      activeDocs.forEach((item) => {
-        const docRef = doc(db, "reviews", item.id.toString());
-        batch.update(docRef, { archived: true });
-      });
-      await batch.commit();
+      const BATCH_SIZE = 400;
+      for (let i = 0; i < activeDocs.length; i += BATCH_SIZE) {
+        const chunk = activeDocs.slice(i, i + BATCH_SIZE);
+        const batch = writeBatch(db);
+        chunk.forEach((item) => {
+          const docRef = doc(db, "reviews", item.id.toString());
+          batch.update(docRef, { archived: true });
+        });
+        await batch.commit();
+      }
     } catch (err) {
       console.error("주간 데이터 초기화 오류:", err);
       alert("주간 데이터 초기화 도중 오류가 발생했습니다: " + (err as Error).message);
@@ -680,7 +814,7 @@ export function ReviewsProvider({ children }: { children: React.ReactNode }) {
       const docRef = doc(db, "reviews", nextId.toString());
       const batch = writeBatch(db);
       
-      batch.set(docRef, reviewDoc);
+      batch.set(docRef, sanitizeForFirestore(reviewDoc));
       await batch.commit();
     } catch (err) {
       console.error("Firestore review add error:", err);
@@ -733,10 +867,188 @@ export function ReviewsProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  // Reset dataset back to initial static dataset (deleting any uploaded/imported Firestore documents)
+  const resetToInitialData = async () => {
+    setIsSyncing(true);
+    try {
+      while (true) {
+        const snapshot = await getDocs(query(collection(db, "reviews"), limit(400)));
+        if (snapshot.empty) break;
+        const batch = writeBatch(db);
+        snapshot.docs.forEach(d => batch.delete(d.ref));
+        await batch.commit();
+      }
+    } catch (err) {
+      console.error("Reset error:", err);
+    } finally {
+      setRawReviews(mapStaticReviews(staticReviews));
+      setRawIncidents(initialIncidentsData);
+      setIsFirestoreEmpty(true);
+      setIsUsingLocalData(true);
+      setIsSyncing(false);
+    }
+  };
+
+  // Dedicated CS Incidents Importer (Completely separate from Photo Reviews) with Smart Deduplication
+  const importIncidents = async (newIncidents: Incident[], replace: boolean = true) => {
+    setIsSyncing(true);
+    try {
+      let combined: Incident[];
+      if (!replace) {
+        // Deep deduplicated merge
+        const mergedList: Incident[] = rawIncidents.map(i => ({ ...i }));
+        newIncidents.forEach(incoming => {
+          const matchIdx = mergedList.findIndex(existing => {
+            if (existing.id && incoming.id && (existing.id === incoming.id || existing.id.replace(/\D/g, "") === incoming.id.replace(/\D/g, ""))) {
+              return true;
+            }
+            if (existing.orderNumber && incoming.orderNumber && existing.orderNumber === incoming.orderNumber && existing.product === incoming.product) {
+              return true;
+            }
+            if (existing.date === incoming.date && existing.product === incoming.product) {
+              const inText = (incoming.claimText || "").trim();
+              const exText = (existing.claimText || "").trim();
+              if (inText.length >= 6 && exText.length >= 6 && (inText === exText || inText.includes(exText) || exText.includes(inText))) {
+                return true;
+              }
+            }
+            return false;
+          });
+
+          if (matchIdx !== -1) {
+            // Update matched existing record
+            const ex = mergedList[matchIdx];
+            if (incoming.refundAmount && !ex.refundAmount) ex.refundAmount = incoming.refundAmount;
+            if (incoming.image_url && !ex.image_url) ex.image_url = incoming.image_url;
+            if (incoming.csResponse && !ex.csResponse) ex.csResponse = incoming.csResponse;
+            if (incoming.orderNumber && !ex.orderNumber) ex.orderNumber = incoming.orderNumber;
+            if (incoming.incidentStatus) ex.incidentStatus = incoming.incidentStatus;
+            if (incoming.claimText && incoming.claimText.length > (ex.claimText?.length || 0)) {
+              ex.claimText = incoming.claimText;
+            }
+          } else {
+            mergedList.push({ ...incoming });
+          }
+        });
+        combined = mergedList;
+      } else {
+        combined = [...newIncidents];
+      }
+
+      combined.sort((a, b) => {
+        if (b.date !== a.date) return b.date.localeCompare(a.date);
+        return b.id.localeCompare(a.id);
+      });
+
+      setRawIncidents(combined);
+    } catch (err) {
+      console.error("CS Incident import error:", err);
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  // Bulk import parsed CSV reviews into state (and sync to Firestore if not using local data)
+  const importParsedReviews = async (newReviews: Review[], append: boolean = true) => {
+    setIsSyncing(true);
+    try {
+      let combined: Review[];
+      if (append) {
+        // Safe non-destructive append:
+        // Find current max id in rawReviews
+        const currentMaxId = rawReviews.reduce((max, r) => Math.max(max, Number(r.id) || 0), 0);
+        let nextAvailableId = Math.max(currentMaxId + 1, 201);
+
+        const existingMap = new Map<number, Review>();
+        rawReviews.forEach(r => existingMap.set(r.id, { ...r }));
+
+        newReviews.forEach(incoming => {
+          if (existingMap.has(incoming.id)) {
+            const existing = existingMap.get(incoming.id)!;
+            // If the incoming is updating CS fields or has matching content, safely enrich without losing photo / classification
+            if (incoming.incidentStatus || incoming.accidentType || incoming.refundAmount !== undefined) {
+              if (incoming.incidentStatus) existing.incidentStatus = incoming.incidentStatus;
+              if (incoming.accidentType) existing.accidentType = incoming.accidentType;
+              if (incoming.accidentDetail) existing.accidentDetail = incoming.accidentDetail;
+              if (incoming.refundAmount !== undefined) existing.refundAmount = incoming.refundAmount;
+              if (incoming.image_url && !existing.image_url) existing.image_url = incoming.image_url;
+              if (incoming.incidentStatus === "처리완료") {
+                existing.type = "비추천";
+                existing.rating = 1;
+              }
+            } else if (incoming.product === existing.product && incoming.date === existing.date) {
+              // Same product and date: merge fields safely
+              if (incoming.review && incoming.review.length > (existing.review?.length || 0)) {
+                existing.review = incoming.review;
+              }
+            } else {
+              // Conflicting ID from a new CSV (e.g. new CSV starting with ID 1 but totally different review)
+              // Assign a new safe ID so it doesn't overwrite existing review!
+              const newSafeId = nextAvailableId++;
+              existingMap.set(newSafeId, {
+                ...incoming,
+                id: newSafeId,
+                reviewer: incoming.reviewer || getMaskedName(newSafeId, incoming.rawReviewer)
+              });
+            }
+          } else {
+            // New ID: add directly
+            existingMap.set(incoming.id, { ...incoming });
+          }
+        });
+
+        combined = Array.from(existingMap.values());
+      } else {
+        combined = [...newReviews];
+      }
+
+      combined.sort((a, b) => {
+        if (b.date !== a.date) {
+          return b.date.localeCompare(a.date);
+        }
+        return b.id - a.id;
+      });
+
+      setRawReviews(combined);
+
+      // If Firestore is connected & synced, write batch
+      if (!isUsingLocalData) {
+        if (!append) {
+          // Clear existing Firestore docs first when replacing
+          while (true) {
+            const snapshot = await getDocs(query(collection(db, "reviews"), limit(400)));
+            if (snapshot.empty) break;
+            const batch = writeBatch(db);
+            snapshot.docs.forEach(d => batch.delete(d.ref));
+            await batch.commit();
+          }
+        }
+
+        const BATCH_SIZE = 400;
+        for (let i = 0; i < combined.length; i += BATCH_SIZE) {
+          const chunk = combined.slice(i, i + BATCH_SIZE);
+          const batch = writeBatch(db);
+          chunk.forEach(item => {
+            const docRef = doc(db, "reviews", item.id.toString());
+            batch.set(docRef, sanitizeForFirestore(item));
+          });
+          await batch.commit();
+        }
+      }
+    } catch (err) {
+      console.error("CSV Import error:", err);
+      handleFirestoreError(err, OperationType.WRITE, "reviews");
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
   return (
     <ReviewsContext.Provider value={{
       reviews,
       weeklyReviews,
+      incidents,
+      weeklyIncidents,
       productStats,
       isLoading,
       isFirestoreEmpty,
@@ -749,12 +1061,15 @@ export function ReviewsProvider({ children }: { children: React.ReactNode }) {
       setWeekFilter,
       weekRanges,
       refreshData,
+      resetToInitialData,
       activeTab,
       setActiveTab,
       metricsProductFilter,
       setMetricsProductFilter,
       metricsTypeFilter,
-      setMetricsTypeFilter
+      setMetricsTypeFilter,
+      importParsedReviews,
+      importIncidents
     }}>
       {children}
     </ReviewsContext.Provider>

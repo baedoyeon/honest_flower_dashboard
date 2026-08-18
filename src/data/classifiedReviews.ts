@@ -17,6 +17,10 @@ export interface Review {
   image_url?: string;
   rawReviewer?: string;
   image_urls?: string[];
+  incidentStatus?: "처리완료" | "반려됨" | "접수중";
+  accidentType?: string;
+  accidentDetail?: string;
+  refundAmount?: number;
 }
 
 export interface ProductStat {
@@ -26,13 +30,14 @@ export interface ProductStat {
   recommend: number;
   neutral: number;
   notRecommend: number;
+  accidentCount?: number;
   recommendRate: number;
 }
 
 export const reviewsData: Review[] = [
   {
     "id": 1,
-    "date": "2026.06.25",
+    "date": "2026.08.08",
     "product": "테디베어 해바라기",
     "rating": 5,
     "type": "추천",
@@ -42,7 +47,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 2,
-    "date": "2026.06.25",
+    "date": "2026.08.08",
     "product": "플라워 럭키박스",
     "rating": 5,
     "type": "추천",
@@ -52,7 +57,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 3,
-    "date": "2026.06.25",
+    "date": "2026.08.08",
     "product": "(한정) 해바라기 에이드 믹스 외 1",
     "rating": 5,
     "type": "추천",
@@ -62,7 +67,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 4,
-    "date": "2026.06.25",
+    "date": "2026.08.08",
     "product": "플로픽 파스텔",
     "rating": 5,
     "type": "추천",
@@ -72,7 +77,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 5,
-    "date": "2026.06.25",
+    "date": "2026.08.08",
     "product": "엔카이셔스+화병 세트",
     "rating": 5,
     "type": "추천",
@@ -82,7 +87,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 6,
-    "date": "2026.06.25",
+    "date": "2026.08.08",
     "product": "알스트로메리아 외 1",
     "rating": 5,
     "type": "추천",
@@ -92,7 +97,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 7,
-    "date": "2026.06.25",
+    "date": "2026.08.08",
     "product": "프릴 리시안셔스 외 1",
     "rating": 5,
     "type": "추천",
@@ -102,7 +107,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 8,
-    "date": "2026.06.25",
+    "date": "2026.08.08",
     "product": "플로픽 내추럴",
     "rating": 5,
     "type": "추천",
@@ -112,7 +117,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 9,
-    "date": "2026.06.25",
+    "date": "2026.08.08",
     "product": "샌더소니아",
     "rating": 5,
     "type": "추천",
@@ -122,7 +127,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 10,
-    "date": "2026.06.25",
+    "date": "2026.08.08",
     "product": "엔카이셔스",
     "rating": 5,
     "type": "추천",
@@ -132,7 +137,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 11,
-    "date": "2026.06.25",
+    "date": "2026.08.08",
     "product": "퐁퐁 국화 외 2",
     "rating": 5,
     "type": "추천",
@@ -142,7 +147,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 12,
-    "date": "2026.06.25",
+    "date": "2026.08.08",
     "product": "엔카이셔스",
     "rating": 5,
     "type": "추천",
@@ -152,7 +157,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 13,
-    "date": "2026.06.25",
+    "date": "2026.08.08",
     "product": "엔카이셔스+화병 세트",
     "rating": 5,
     "type": "추천",
@@ -162,7 +167,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 14,
-    "date": "2026.06.25",
+    "date": "2026.08.08",
     "product": "엔카이셔스",
     "rating": 5,
     "type": "추천",
@@ -172,7 +177,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 15,
-    "date": "2026.06.25",
+    "date": "2026.08.08",
     "product": "열매 수국",
     "rating": 5,
     "type": "추천",
@@ -182,7 +187,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 16,
-    "date": "2026.06.25",
+    "date": "2026.08.08",
     "product": "홍화",
     "rating": 4,
     "type": "중립",
@@ -192,7 +197,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 17,
-    "date": "2026.06.25",
+    "date": "2026.08.08",
     "product": "열매 너도밤나무",
     "rating": 5,
     "type": "추천",
@@ -202,7 +207,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 18,
-    "date": "2026.06.25",
+    "date": "2026.08.08",
     "product": "자리공",
     "rating": 5,
     "type": "추천",
@@ -212,7 +217,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 19,
-    "date": "2026.06.25",
+    "date": "2026.08.08",
     "product": "오리목",
     "rating": 5,
     "type": "추천",
@@ -222,7 +227,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 20,
-    "date": "2026.06.25",
+    "date": "2026.08.08",
     "product": "자리공",
     "rating": 1,
     "type": "비추천",
@@ -232,7 +237,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 21,
-    "date": "2026.06.25",
+    "date": "2026.08.08",
     "product": "열매 망개",
     "rating": 5,
     "type": "추천",
@@ -242,7 +247,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 22,
-    "date": "2026.06.25",
+    "date": "2026.08.08",
     "product": "엔카이셔스",
     "rating": 5,
     "type": "추천",
@@ -252,7 +257,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 23,
-    "date": "2026.06.25",
+    "date": "2026.08.08",
     "product": "(한정) 해바라기 에이드 믹스",
     "rating": 5,
     "type": "추천",
@@ -262,7 +267,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 24,
-    "date": "2026.06.25",
+    "date": "2026.08.08",
     "product": "작약",
     "rating": 5,
     "type": "추천",
@@ -272,7 +277,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 25,
-    "date": "2026.06.25",
+    "date": "2026.08.08",
     "product": "레이스플라워 외 1",
     "rating": 3,
     "type": "비추천",
@@ -282,7 +287,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 26,
-    "date": "2026.06.25",
+    "date": "2026.08.08",
     "product": "레몬 해바라기",
     "rating": 5,
     "type": "추천",
@@ -292,7 +297,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 27,
-    "date": "2026.06.25",
+    "date": "2026.08.08",
     "product": "엔카이셔스",
     "rating": 5,
     "type": "추천",
@@ -302,7 +307,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 28,
-    "date": "2026.06.25",
+    "date": "2026.08.08",
     "product": "엔카이셔스+화병 세트",
     "rating": 5,
     "type": "추천",
@@ -312,7 +317,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 29,
-    "date": "2026.06.25",
+    "date": "2026.08.08",
     "product": "아마란서스 외 1",
     "rating": 5,
     "type": "추천",
@@ -322,7 +327,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 30,
-    "date": "2026.06.25",
+    "date": "2026.08.08",
     "product": "엔카이셔스",
     "rating": 5,
     "type": "추천",
@@ -332,7 +337,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 31,
-    "date": "2026.06.25",
+    "date": "2026.08.08",
     "product": "엔카이셔스+화병 세트",
     "rating": 5,
     "type": "추천",
@@ -342,7 +347,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 32,
-    "date": "2026.06.25",
+    "date": "2026.08.08",
     "product": "절화수명연장제 외 1",
     "rating": 5,
     "type": "추천",
@@ -352,7 +357,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 33,
-    "date": "2026.06.25",
+    "date": "2026.08.08",
     "product": "글라디올러스 외 3",
     "rating": 5,
     "type": "추천",
@@ -362,7 +367,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 34,
-    "date": "2026.06.25",
+    "date": "2026.08.08",
     "product": "금꿩의 다리",
     "rating": 4,
     "type": "중립",
@@ -372,7 +377,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 35,
-    "date": "2026.06.25",
+    "date": "2026.08.08",
     "product": "플라워 럭키박스",
     "rating": 5,
     "type": "추천",
@@ -382,7 +387,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 36,
-    "date": "2026.06.25",
+    "date": "2026.08.08",
     "product": "페니쿰 외 1",
     "rating": 5,
     "type": "추천",
@@ -392,7 +397,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 37,
-    "date": "2026.06.25",
+    "date": "2026.08.08",
     "product": "플로픽 비비드",
     "rating": 3,
     "type": "비추천",
@@ -402,7 +407,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 38,
-    "date": "2026.06.25",
+    "date": "2026.08.08",
     "product": "열매 수국 외 1",
     "rating": 5,
     "type": "추천",
@@ -412,7 +417,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 39,
-    "date": "2026.06.25",
+    "date": "2026.08.08",
     "product": "밀레니얼 핑크 장미",
     "rating": 5,
     "type": "추천",
@@ -422,7 +427,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 40,
-    "date": "2026.06.25",
+    "date": "2026.08.08",
     "product": "미스티블루",
     "rating": 5,
     "type": "추천",
@@ -432,7 +437,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 41,
-    "date": "2026.06.25",
+    "date": "2026.08.08",
     "product": "무늬 레몬트리 외 2",
     "rating": 5,
     "type": "추천",
@@ -442,7 +447,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 42,
-    "date": "2026.06.25",
+    "date": "2026.08.08",
     "product": "엔카이셔스",
     "rating": 5,
     "type": "추천",
@@ -452,7 +457,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 43,
-    "date": "2026.06.25",
+    "date": "2026.08.08",
     "product": "덴파레",
     "rating": 5,
     "type": "추천",
@@ -462,7 +467,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 44,
-    "date": "2026.06.25",
+    "date": "2026.08.08",
     "product": "자이언트 델피늄",
     "rating": 1,
     "type": "비추천",
@@ -472,7 +477,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 45,
-    "date": "2026.06.24",
+    "date": "2026.08.07",
     "product": "플라워 럭키박스",
     "rating": 2,
     "type": "비추천",
@@ -482,7 +487,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 46,
-    "date": "2026.06.24",
+    "date": "2026.08.07",
     "product": "플로픽 파스텔",
     "rating": 5,
     "type": "추천",
@@ -492,7 +497,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 47,
-    "date": "2026.06.24",
+    "date": "2026.08.07",
     "product": "피콜리니 거베라",
     "rating": 4,
     "type": "중립",
@@ -502,7 +507,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 48,
-    "date": "2026.06.24",
+    "date": "2026.08.07",
     "product": "초코 해바라기 외 3",
     "rating": 5,
     "type": "추천",
@@ -512,7 +517,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 49,
-    "date": "2026.06.24",
+    "date": "2026.08.07",
     "product": "자이언트 델피늄 외 1",
     "rating": 3,
     "type": "비추천",
@@ -522,7 +527,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 50,
-    "date": "2026.06.24",
+    "date": "2026.08.07",
     "product": "(한정) 해바라기 에이드 믹스",
     "rating": 5,
     "type": "추천",
@@ -532,7 +537,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 51,
-    "date": "2026.06.24",
+    "date": "2026.08.07",
     "product": "플라워 럭키박스",
     "rating": 5,
     "type": "추천",
@@ -542,7 +547,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 52,
-    "date": "2026.06.24",
+    "date": "2026.08.07",
     "product": "자리공",
     "rating": 1,
     "type": "비추천",
@@ -552,7 +557,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 53,
-    "date": "2026.06.24",
+    "date": "2026.08.07",
     "product": "테디베어 해바라기 외 1",
     "rating": 3,
     "type": "비추천",
@@ -562,7 +567,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 54,
-    "date": "2026.06.24",
+    "date": "2026.08.07",
     "product": "글라디올러스 외 1",
     "rating": 5,
     "type": "추천",
@@ -572,7 +577,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 55,
-    "date": "2026.06.24",
+    "date": "2026.08.07",
     "product": "플라워 럭키박스",
     "rating": 4,
     "type": "중립",
@@ -582,7 +587,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 56,
-    "date": "2026.06.24",
+    "date": "2026.08.07",
     "product": "거베라 마카롱 믹스",
     "rating": 2,
     "type": "비추천",
@@ -592,7 +597,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 57,
-    "date": "2026.06.24",
+    "date": "2026.08.07",
     "product": "아스크레피아스 외 1",
     "rating": 5,
     "type": "추천",
@@ -602,7 +607,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 58,
-    "date": "2026.06.24",
+    "date": "2026.08.07",
     "product": "스프레이 델피늄 외 1",
     "rating": 5,
     "type": "추천",
@@ -612,7 +617,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 59,
-    "date": "2026.06.24",
+    "date": "2026.08.07",
     "product": "트롤리우스",
     "rating": 5,
     "type": "추천",
@@ -622,7 +627,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 60,
-    "date": "2026.06.24",
+    "date": "2026.08.07",
     "product": "해바라기",
     "rating": 5,
     "type": "추천",
@@ -632,7 +637,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 61,
-    "date": "2026.06.24",
+    "date": "2026.08.07",
     "product": "썸머라일락 외 1",
     "rating": 5,
     "type": "추천",
@@ -642,7 +647,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 62,
-    "date": "2026.06.24",
+    "date": "2026.08.07",
     "product": "플라워 럭키박스",
     "rating": 3,
     "type": "비추천",
@@ -652,7 +657,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 63,
-    "date": "2026.06.24",
+    "date": "2026.08.07",
     "product": "신지매",
     "rating": 5,
     "type": "추천",
@@ -662,7 +667,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 64,
-    "date": "2026.06.24",
+    "date": "2026.08.07",
     "product": "레몬 해바라기",
     "rating": 5,
     "type": "추천",
@@ -672,7 +677,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 65,
-    "date": "2026.06.24",
+    "date": "2026.08.07",
     "product": "플로픽 비비드",
     "rating": 5,
     "type": "추천",
@@ -682,7 +687,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 66,
-    "date": "2026.06.24",
+    "date": "2026.08.07",
     "product": "페니쿰 외 3",
     "rating": 4,
     "type": "중립",
@@ -692,7 +697,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 67,
-    "date": "2026.06.24",
+    "date": "2026.08.07",
     "product": "초코 코스모스",
     "rating": 5,
     "type": "추천",
@@ -702,7 +707,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 68,
-    "date": "2026.06.23",
+    "date": "2026.08.06",
     "product": "플라워 럭키박스",
     "rating": 4,
     "type": "중립",
@@ -712,7 +717,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 69,
-    "date": "2026.06.23",
+    "date": "2026.08.06",
     "product": "엔카이셔스",
     "rating": 5,
     "type": "추천",
@@ -722,7 +727,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 70,
-    "date": "2026.06.23",
+    "date": "2026.08.06",
     "product": "페니쿰 외 1",
     "rating": 5,
     "type": "추천",
@@ -732,7 +737,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 71,
-    "date": "2026.06.23",
+    "date": "2026.08.06",
     "product": "플라워 럭키박스",
     "rating": 5,
     "type": "추천",
@@ -742,7 +747,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 72,
-    "date": "2026.06.23",
+    "date": "2026.08.06",
     "product": "비스위트 장미",
     "rating": 5,
     "type": "추천",
@@ -752,7 +757,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 73,
-    "date": "2026.06.23",
+    "date": "2026.08.06",
     "product": "(한정) 해바라기 에이드 믹스",
     "rating": 1,
     "type": "비추천",
@@ -762,7 +767,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 74,
-    "date": "2026.06.23",
+    "date": "2026.08.06",
     "product": "플로픽 파스텔",
     "rating": 5,
     "type": "추천",
@@ -772,7 +777,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 75,
-    "date": "2026.06.23",
+    "date": "2026.08.06",
     "product": "플라워 럭키박스",
     "rating": 5,
     "type": "추천",
@@ -782,7 +787,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 76,
-    "date": "2026.06.23",
+    "date": "2026.08.06",
     "product": "(한정) 해바라기 에이드 믹스",
     "rating": 5,
     "type": "추천",
@@ -792,7 +797,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 77,
-    "date": "2026.06.23",
+    "date": "2026.08.06",
     "product": "보리사초",
     "rating": 5,
     "type": "추천",
@@ -802,7 +807,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 78,
-    "date": "2026.06.23",
+    "date": "2026.08.06",
     "product": "플라워 럭키박스",
     "rating": 5,
     "type": "추천",
@@ -812,7 +817,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 79,
-    "date": "2026.06.23",
+    "date": "2026.08.06",
     "product": "(한정) 해바라기 에이드 믹스",
     "rating": 5,
     "type": "추천",
@@ -822,7 +827,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 80,
-    "date": "2026.06.23",
+    "date": "2026.08.06",
     "product": "열매 수국",
     "rating": 3,
     "type": "비추천",
@@ -832,7 +837,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 81,
-    "date": "2026.06.23",
+    "date": "2026.08.06",
     "product": "열매 수국 외 1",
     "rating": 1,
     "type": "비추천",
@@ -842,7 +847,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 82,
-    "date": "2026.06.23",
+    "date": "2026.08.06",
     "product": "일본 조팝나무",
     "rating": 5,
     "type": "추천",
@@ -852,7 +857,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 83,
-    "date": "2026.06.23",
+    "date": "2026.08.06",
     "product": "(한정) 해바라기 에이드 믹스",
     "rating": 1,
     "type": "비추천",
@@ -862,7 +867,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 84,
-    "date": "2026.06.23",
+    "date": "2026.08.06",
     "product": "알스트로메리아",
     "rating": 3,
     "type": "비추천",
@@ -872,7 +877,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 85,
-    "date": "2026.06.23",
+    "date": "2026.08.06",
     "product": "트롤리우스",
     "rating": 5,
     "type": "추천",
@@ -882,7 +887,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 86,
-    "date": "2026.06.23",
+    "date": "2026.08.06",
     "product": "비스위트 장미",
     "rating": 4,
     "type": "중립",
@@ -892,7 +897,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 87,
-    "date": "2026.06.23",
+    "date": "2026.08.06",
     "product": "절화수명연장제 외 2",
     "rating": 5,
     "type": "추천",
@@ -902,7 +907,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 88,
-    "date": "2026.06.23",
+    "date": "2026.08.06",
     "product": "제네시스 믹스_06A",
     "rating": 5,
     "type": "추천",
@@ -912,7 +917,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 89,
-    "date": "2026.06.23",
+    "date": "2026.08.06",
     "product": "열매 수국",
     "rating": 5,
     "type": "추천",
@@ -922,7 +927,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 90,
-    "date": "2026.06.23",
+    "date": "2026.08.06",
     "product": "해바라기 외 2",
     "rating": 5,
     "type": "추천",
@@ -932,7 +937,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 91,
-    "date": "2026.06.23",
+    "date": "2026.08.06",
     "product": "절화수명연장제",
     "rating": 5,
     "type": "추천",
@@ -942,7 +947,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 92,
-    "date": "2026.06.23",
+    "date": "2026.08.06",
     "product": "초코 해바라기",
     "rating": 4,
     "type": "중립",
@@ -952,7 +957,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 93,
-    "date": "2026.06.23",
+    "date": "2026.08.06",
     "product": "플로픽 비비드",
     "rating": 5,
     "type": "추천",
@@ -962,7 +967,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 94,
-    "date": "2026.06.23",
+    "date": "2026.08.06",
     "product": "오드랑트 장미 외 2",
     "rating": 5,
     "type": "추천",
@@ -972,7 +977,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 95,
-    "date": "2026.06.23",
+    "date": "2026.08.06",
     "product": "플로픽 파스텔",
     "rating": 5,
     "type": "추천",
@@ -982,7 +987,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 96,
-    "date": "2026.06.23",
+    "date": "2026.08.06",
     "product": "프릴 리시안셔스",
     "rating": 5,
     "type": "추천",
@@ -992,7 +997,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 97,
-    "date": "2026.06.23",
+    "date": "2026.08.06",
     "product": "아스틸베",
     "rating": 5,
     "type": "추천",
@@ -1002,7 +1007,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 98,
-    "date": "2026.06.23",
+    "date": "2026.08.06",
     "product": "(한정) 해바라기 에이드 믹스 외 8",
     "rating": 5,
     "type": "추천",
@@ -1012,7 +1017,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 99,
-    "date": "2026.06.22",
+    "date": "2026.08.05",
     "product": "드럼스틱",
     "rating": 5,
     "type": "추천",
@@ -1022,7 +1027,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 100,
-    "date": "2026.06.22",
+    "date": "2026.08.05",
     "product": "자리공",
     "rating": 5,
     "type": "추천",
@@ -1032,7 +1037,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 101,
-    "date": "2026.06.22",
+    "date": "2026.08.05",
     "product": "아마란서스",
     "rating": 5,
     "type": "추천",
@@ -1042,7 +1047,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 102,
-    "date": "2026.06.22",
+    "date": "2026.08.05",
     "product": "플라워 럭키박스",
     "rating": 5,
     "type": "추천",
@@ -1052,7 +1057,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 103,
-    "date": "2026.06.22",
+    "date": "2026.08.05",
     "product": "(한정) 해바라기 에이드 믹스",
     "rating": 5,
     "type": "추천",
@@ -1062,7 +1067,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 104,
-    "date": "2026.06.22",
+    "date": "2026.08.05",
     "product": "쁘띠 수국 외 3",
     "rating": 5,
     "type": "추천",
@@ -1072,7 +1077,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 105,
-    "date": "2026.06.22",
+    "date": "2026.08.05",
     "product": "(한정) 해바라기 에이드 믹스",
     "rating": 5,
     "type": "추천",
@@ -1082,7 +1087,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 106,
-    "date": "2026.06.22",
+    "date": "2026.08.05",
     "product": "루스커스",
     "rating": 5,
     "type": "추천",
@@ -1092,7 +1097,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 107,
-    "date": "2026.07.01",
+    "date": "2026.08.14",
     "product": "플라워 럭키박스",
     "rating": 3,
     "type": "비추천",
@@ -1102,7 +1107,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 108,
-    "date": "2026.06.22",
+    "date": "2026.08.05",
     "product": "알스트로메리아",
     "rating": 5,
     "type": "추천",
@@ -1112,7 +1117,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 109,
-    "date": "2026.07.01",
+    "date": "2026.08.14",
     "product": "프릴 리시안셔스",
     "rating": 3,
     "type": "비추천",
@@ -1122,7 +1127,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 110,
-    "date": "2026.06.22",
+    "date": "2026.08.05",
     "product": "미니 거베라",
     "rating": 5,
     "type": "추천",
@@ -1132,7 +1137,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 111,
-    "date": "2026.06.22",
+    "date": "2026.08.05",
     "product": "수국 컬러믹스",
     "rating": 4,
     "type": "중립",
@@ -1142,7 +1147,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 112,
-    "date": "2026.06.22",
+    "date": "2026.08.05",
     "product": "(한정) 해바라기 에이드 믹스",
     "rating": 3,
     "type": "비추천",
@@ -1152,7 +1157,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 113,
-    "date": "2026.06.22",
+    "date": "2026.08.05",
     "product": "쉼머 장미 외 2",
     "rating": 4,
     "type": "중립",
@@ -1162,7 +1167,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 114,
-    "date": "2026.06.22",
+    "date": "2026.08.05",
     "product": "엔카이셔스",
     "rating": 5,
     "type": "추천",
@@ -1172,7 +1177,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 115,
-    "date": "2026.06.22",
+    "date": "2026.08.05",
     "product": "플라워 럭키박스",
     "rating": 5,
     "type": "추천",
@@ -1182,7 +1187,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 116,
-    "date": "2026.06.22",
+    "date": "2026.08.05",
     "product": "라벤더 잎",
     "rating": 5,
     "type": "추천",
@@ -1192,7 +1197,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 117,
-    "date": "2026.06.21",
+    "date": "2026.08.04",
     "product": "아마란서스 외 1",
     "rating": 5,
     "type": "추천",
@@ -1202,7 +1207,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 118,
-    "date": "2026.06.21",
+    "date": "2026.08.04",
     "product": "파스타 거베라",
     "rating": 5,
     "type": "추천",
@@ -1212,7 +1217,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 119,
-    "date": "2026.06.21",
+    "date": "2026.08.04",
     "product": "열매 수국 외 1",
     "rating": 5,
     "type": "추천",
@@ -1222,7 +1227,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 120,
-    "date": "2026.06.21",
+    "date": "2026.08.04",
     "product": "플라워 럭키박스",
     "rating": 5,
     "type": "추천",
@@ -1232,7 +1237,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 121,
-    "date": "2026.06.21",
+    "date": "2026.08.04",
     "product": "(한정) 해바라기 에이드 믹스 외 1",
     "rating": 5,
     "type": "추천",
@@ -1242,7 +1247,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 122,
-    "date": "2026.06.21",
+    "date": "2026.08.04",
     "product": "(한정) 해바라기 에이드 믹스",
     "rating": 5,
     "type": "추천",
@@ -1252,7 +1257,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 123,
-    "date": "2026.06.20",
+    "date": "2026.08.03",
     "product": "플로픽 비비드",
     "rating": 3,
     "type": "비추천",
@@ -1262,7 +1267,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 124,
-    "date": "2026.06.20",
+    "date": "2026.08.03",
     "product": "오이초 외 8",
     "rating": 5,
     "type": "추천",
@@ -1272,7 +1277,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 125,
-    "date": "2026.06.20",
+    "date": "2026.08.03",
     "product": "(한정) 해바라기 에이드 믹스",
     "rating": 5,
     "type": "추천",
@@ -1282,7 +1287,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 126,
-    "date": "2026.06.20",
+    "date": "2026.08.03",
     "product": "플라워 럭키박스",
     "rating": 5,
     "type": "추천",
@@ -1292,7 +1297,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 127,
-    "date": "2026.06.20",
+    "date": "2026.08.03",
     "product": "플라워 럭키박스",
     "rating": 5,
     "type": "추천",
@@ -1302,7 +1307,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 128,
-    "date": "2026.06.20",
+    "date": "2026.08.03",
     "product": "(한정) 해바라기 에이드 믹스",
     "rating": 5,
     "type": "추천",
@@ -1312,7 +1317,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 129,
-    "date": "2026.06.20",
+    "date": "2026.08.03",
     "product": "쁘띠 수국 외 2",
     "rating": 5,
     "type": "추천",
@@ -1322,7 +1327,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 130,
-    "date": "2026.06.20",
+    "date": "2026.08.03",
     "product": "쁘띠 수국 외 2",
     "rating": 5,
     "type": "추천",
@@ -1332,7 +1337,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 131,
-    "date": "2026.06.30",
+    "date": "2026.08.13",
     "product": "7월 플로리스트픽 내추럴",
     "rating": 3,
     "type": "비추천",
@@ -1342,7 +1347,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 132,
-    "date": "2026.06.20",
+    "date": "2026.08.03",
     "product": "(한정) 장미 랜덤박스",
     "rating": 1,
     "type": "비추천",
@@ -1352,7 +1357,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 133,
-    "date": "2026.06.20",
+    "date": "2026.08.03",
     "product": "쁘띠 수국 외 2",
     "rating": 5,
     "type": "추천",
@@ -1362,7 +1367,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 134,
-    "date": "2026.06.20",
+    "date": "2026.08.03",
     "product": "자리공 외 2",
     "rating": 3,
     "type": "비추천",
@@ -1372,7 +1377,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 135,
-    "date": "2026.06.20",
+    "date": "2026.08.03",
     "product": "(한정) 해바라기 에이드 믹스",
     "rating": 5,
     "type": "추천",
@@ -1382,7 +1387,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 136,
-    "date": "2026.06.20",
+    "date": "2026.08.03",
     "product": "(한정) 해바라기 에이드 믹스 외 1",
     "rating": 5,
     "type": "추천",
@@ -1392,7 +1397,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 137,
-    "date": "2026.06.20",
+    "date": "2026.08.03",
     "product": "거베라 마카롱 믹스",
     "rating": 5,
     "type": "추천",
@@ -1402,7 +1407,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 138,
-    "date": "2026.06.20",
+    "date": "2026.08.03",
     "product": "모루 유리화기 외 1",
     "rating": 5,
     "type": "추천",
@@ -1412,7 +1417,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 139,
-    "date": "2026.06.20",
+    "date": "2026.08.03",
     "product": "플라워 럭키박스",
     "rating": 5,
     "type": "추천",
@@ -1422,7 +1427,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 140,
-    "date": "2026.06.20",
+    "date": "2026.08.03",
     "product": "플라워 럭키박스",
     "rating": 3,
     "type": "비추천",
@@ -1432,7 +1437,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 141,
-    "date": "2026.06.20",
+    "date": "2026.08.03",
     "product": "작약 외 6",
     "rating": 5,
     "type": "추천",
@@ -1442,7 +1447,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 142,
-    "date": "2026.06.20",
+    "date": "2026.08.03",
     "product": "초코 해바라기",
     "rating": 5,
     "type": "추천",
@@ -1452,7 +1457,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 143,
-    "date": "2026.06.20",
+    "date": "2026.08.03",
     "product": "플로픽 내추럴 외 1",
     "rating": 5,
     "type": "추천",
@@ -1462,7 +1467,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 144,
-    "date": "2026.06.20",
+    "date": "2026.08.03",
     "product": "레이스플라워 외 1",
     "rating": 5,
     "type": "추천",
@@ -1472,7 +1477,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 145,
-    "date": "2026.06.20",
+    "date": "2026.08.03",
     "product": "(한정) 해바라기 에이드 믹스",
     "rating": 5,
     "type": "추천",
@@ -1482,7 +1487,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 146,
-    "date": "2026.06.20",
+    "date": "2026.08.03",
     "product": "실바써니 장미",
     "rating": 5,
     "type": "추천",
@@ -1492,7 +1497,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 147,
-    "date": "2026.06.20",
+    "date": "2026.08.03",
     "product": "플로픽 비비드 외 1",
     "rating": 5,
     "type": "추천",
@@ -1502,7 +1507,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 148,
-    "date": "2026.06.20",
+    "date": "2026.08.03",
     "product": "미니 거베라 외 1",
     "rating": 5,
     "type": "추천",
@@ -1512,7 +1517,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 149,
-    "date": "2026.06.20",
+    "date": "2026.08.03",
     "product": "(한정) 해바라기 에이드 믹스",
     "rating": 5,
     "type": "추천",
@@ -1522,7 +1527,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 150,
-    "date": "2026.06.20",
+    "date": "2026.08.03",
     "product": "절화수명연장제 외 1",
     "rating": 5,
     "type": "추천",
@@ -1532,7 +1537,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 151,
-    "date": "2026.06.20",
+    "date": "2026.08.03",
     "product": "테디베어 해바라기 외 1",
     "rating": 4,
     "type": "중립",
@@ -1542,7 +1547,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 152,
-    "date": "2026.06.20",
+    "date": "2026.08.03",
     "product": "아스크레피아스 외 1",
     "rating": 5,
     "type": "추천",
@@ -1552,7 +1557,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 153,
-    "date": "2026.06.20",
+    "date": "2026.08.03",
     "product": "안스리움",
     "rating": 5,
     "type": "추천",
@@ -1562,7 +1567,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 154,
-    "date": "2026.06.20",
+    "date": "2026.08.03",
     "product": "글라디올러스",
     "rating": 5,
     "type": "추천",
@@ -1572,7 +1577,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 155,
-    "date": "2026.06.20",
+    "date": "2026.08.03",
     "product": "엔카이셔스",
     "rating": 4,
     "type": "중립",
@@ -1582,7 +1587,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 156,
-    "date": "2026.06.20",
+    "date": "2026.08.03",
     "product": "쁘띠 수국",
     "rating": 2,
     "type": "비추천",
@@ -1592,7 +1597,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 157,
-    "date": "2026.06.20",
+    "date": "2026.08.03",
     "product": "어텀파티 장미",
     "rating": 5,
     "type": "추천",
@@ -1602,7 +1607,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 158,
-    "date": "2026.06.20",
+    "date": "2026.08.03",
     "product": "프릴 리시안셔스 외 1",
     "rating": 5,
     "type": "추천",
@@ -1612,7 +1617,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 159,
-    "date": "2026.06.20",
+    "date": "2026.08.03",
     "product": "자리공",
     "rating": 5,
     "type": "추천",
@@ -1622,7 +1627,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 160,
-    "date": "2026.06.20",
+    "date": "2026.08.03",
     "product": "포장 DIY 세트",
     "rating": 3,
     "type": "비추천",
@@ -1632,7 +1637,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 161,
-    "date": "2026.06.20",
+    "date": "2026.08.03",
     "product": "절화수명연장제",
     "rating": 5,
     "type": "추천",
@@ -1642,7 +1647,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 162,
-    "date": "2026.06.20",
+    "date": "2026.08.03",
     "product": "열매 수국 외 1",
     "rating": 5,
     "type": "추천",
@@ -1652,7 +1657,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 163,
-    "date": "2026.06.19",
+    "date": "2026.08.02",
     "product": "(한정) 해바라기 에이드 믹스 외 1",
     "rating": 5,
     "type": "추천",
@@ -1662,7 +1667,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 164,
-    "date": "2026.06.19",
+    "date": "2026.08.02",
     "product": "프릴 리시안셔스 외 1",
     "rating": 5,
     "type": "추천",
@@ -1672,7 +1677,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 165,
-    "date": "2026.06.19",
+    "date": "2026.08.02",
     "product": "열매 수국 외 1",
     "rating": 5,
     "type": "추천",
@@ -1682,7 +1687,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 166,
-    "date": "2026.06.19",
+    "date": "2026.08.02",
     "product": "플로픽 파스텔",
     "rating": 5,
     "type": "추천",
@@ -1692,7 +1697,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 167,
-    "date": "2026.06.19",
+    "date": "2026.08.02",
     "product": "에포크 그린 빈티지 화병 외 1",
     "rating": 5,
     "type": "추천",
@@ -1702,7 +1707,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 168,
-    "date": "2026.06.19",
+    "date": "2026.08.02",
     "product": "(한정) 해바라기 에이드 믹스",
     "rating": 5,
     "type": "추천",
@@ -1712,7 +1717,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 169,
-    "date": "2026.06.19",
+    "date": "2026.08.02",
     "product": "거베라 마카롱 믹스 외 1",
     "rating": 5,
     "type": "추천",
@@ -1722,7 +1727,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 170,
-    "date": "2026.06.19",
+    "date": "2026.08.02",
     "product": "(한정) 해바라기 에이드 믹스",
     "rating": 5,
     "type": "추천",
@@ -1732,7 +1737,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 171,
-    "date": "2026.06.19",
+    "date": "2026.08.02",
     "product": "(한정) 해바라기 에이드 믹스",
     "rating": 5,
     "type": "추천",
@@ -1742,7 +1747,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 172,
-    "date": "2026.06.19",
+    "date": "2026.08.02",
     "product": "(한정) 해바라기 에이드 믹스",
     "rating": 5,
     "type": "추천",
@@ -1752,7 +1757,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 173,
-    "date": "2026.06.19",
+    "date": "2026.08.02",
     "product": "자리공 외 1",
     "rating": 5,
     "type": "추천",
@@ -1762,7 +1767,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 174,
-    "date": "2026.06.19",
+    "date": "2026.08.02",
     "product": "하이베리쿰",
     "rating": 5,
     "type": "추천",
@@ -1772,7 +1777,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 175,
-    "date": "2026.06.19",
+    "date": "2026.08.02",
     "product": "보리사초 외 1",
     "rating": 5,
     "type": "추천",
@@ -1782,7 +1787,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 176,
-    "date": "2026.06.19",
+    "date": "2026.08.02",
     "product": "파스타 거베라 외 2",
     "rating": 5,
     "type": "추천",
@@ -1792,7 +1797,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 177,
-    "date": "2026.06.19",
+    "date": "2026.08.02",
     "product": "아스틸베 외 1",
     "rating": 5,
     "type": "추천",
@@ -1802,7 +1807,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 178,
-    "date": "2026.06.19",
+    "date": "2026.08.02",
     "product": "알스트로메리아",
     "rating": 5,
     "type": "추천",
@@ -1812,7 +1817,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 179,
-    "date": "2026.06.19",
+    "date": "2026.08.02",
     "product": "꽃가위",
     "rating": 5,
     "type": "추천",
@@ -1822,7 +1827,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 180,
-    "date": "2026.06.19",
+    "date": "2026.08.02",
     "product": "아스크레피아스 외 1",
     "rating": 5,
     "type": "추천",
@@ -1832,7 +1837,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 181,
-    "date": "2026.06.19",
+    "date": "2026.08.02",
     "product": "플라워 럭키박스",
     "rating": 5,
     "type": "추천",
@@ -1842,7 +1847,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 182,
-    "date": "2026.06.19",
+    "date": "2026.08.02",
     "product": "하이베리쿰",
     "rating": 1,
     "type": "비추천",
@@ -1852,7 +1857,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 183,
-    "date": "2026.06.19",
+    "date": "2026.08.02",
     "product": "플라워 럭키박스",
     "rating": 5,
     "type": "추천",
@@ -1862,7 +1867,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 184,
-    "date": "2026.06.19",
+    "date": "2026.08.02",
     "product": "플라워 럭키박스",
     "rating": 4,
     "type": "중립",
@@ -1872,7 +1877,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 185,
-    "date": "2026.06.19",
+    "date": "2026.08.02",
     "product": "(한정) 해바라기 에이드 믹스",
     "rating": 5,
     "type": "추천",
@@ -1882,7 +1887,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 186,
-    "date": "2026.06.19",
+    "date": "2026.08.02",
     "product": "피콜리니 거베라",
     "rating": 5,
     "type": "추천",
@@ -1892,7 +1897,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 187,
-    "date": "2026.06.19",
+    "date": "2026.08.02",
     "product": "엔카이셔스",
     "rating": 4,
     "type": "중립",
@@ -1902,7 +1907,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 188,
-    "date": "2026.06.19",
+    "date": "2026.08.02",
     "product": "플라워 럭키박스",
     "rating": 5,
     "type": "추천",
@@ -1912,7 +1917,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 189,
-    "date": "2026.06.19",
+    "date": "2026.08.02",
     "product": "엔카이셔스",
     "rating": 5,
     "type": "추천",
@@ -1922,7 +1927,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 190,
-    "date": "2026.06.19",
+    "date": "2026.08.02",
     "product": "플라워 럭키박스",
     "rating": 5,
     "type": "추천",
@@ -1932,7 +1937,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 191,
-    "date": "2026.06.19",
+    "date": "2026.08.02",
     "product": "엔카이셔스",
     "rating": 5,
     "type": "추천",
@@ -1942,7 +1947,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 192,
-    "date": "2026.06.19",
+    "date": "2026.08.02",
     "product": "엔카이셔스",
     "rating": 5,
     "type": "추천",
@@ -1952,7 +1957,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 193,
-    "date": "2026.06.18",
+    "date": "2026.08.01",
     "product": "레이스플라워",
     "rating": 5,
     "type": "추천",
@@ -1962,7 +1967,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 194,
-    "date": "2026.06.18",
+    "date": "2026.08.01",
     "product": "플라워 럭키박스",
     "rating": 5,
     "type": "추천",
@@ -1972,7 +1977,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 195,
-    "date": "2026.06.28",
+    "date": "2026.08.11",
     "product": "테디베어 해바라기",
     "rating": 3,
     "type": "비추천",
@@ -1982,7 +1987,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 196,
-    "date": "2026.06.18",
+    "date": "2026.08.01",
     "product": "플로픽 비비드",
     "rating": 5,
     "type": "추천",
@@ -1992,7 +1997,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 197,
-    "date": "2026.06.18",
+    "date": "2026.08.01",
     "product": "엔카이셔스",
     "rating": 5,
     "type": "추천",
@@ -2002,7 +2007,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 198,
-    "date": "2026.06.18",
+    "date": "2026.08.01",
     "product": "조",
     "rating": 5,
     "type": "추천",
@@ -2012,7 +2017,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 199,
-    "date": "2026.06.18",
+    "date": "2026.08.01",
     "product": "엔카이셔스",
     "rating": 5,
     "type": "추천",
@@ -2022,7 +2027,7 @@ export const reviewsData: Review[] = [
   },
   {
     "id": 200,
-    "date": "2026.06.18",
+    "date": "2026.08.01",
     "product": "엔카이셔스+화병 세트",
     "rating": 2,
     "type": "비추천",

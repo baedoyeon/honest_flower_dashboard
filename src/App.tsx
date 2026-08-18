@@ -2,9 +2,10 @@ import { useState } from "react";
 import Header from "./components/Header";
 import WeeklyMetricsTab from "./components/WeeklyMetricsTab";
 import ProductStatusTab from "./components/ProductStatusTab";
+import AccidentIncidentsTab from "./components/AccidentIncidentsTab";
 import VOCAnaTab from "./components/VOCAnaTab";
 import ReviewArchiveTab from "./components/ReviewArchiveTab";
-import { BarChart2, Sprout, PieChart, Archive, Sparkles, Building2, Calendar } from "lucide-react";
+import { BarChart2, Sprout, ShieldAlert, PieChart, Archive, Sparkles, Building2, Calendar } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { ReviewsProvider, useReviews } from "./context/ReviewsContext";
 
@@ -22,6 +23,7 @@ function AppContent() {
   const tabs = [
     { id: "metrics", label: "주간 핵심 지표", icon: <BarChart2 className="h-4 w-4" /> },
     { id: "products", label: "상품별 현황", icon: <Sprout className="h-4 w-4" /> },
+    { id: "incidents", label: "사고접수", icon: <ShieldAlert className="h-4 w-4" /> },
     { id: "voc", label: "VOC 카테고리 분석", icon: <PieChart className="h-4 w-4" /> },
     { id: "archive", label: "원본 후기 아카이브", icon: <Archive className="h-4 w-4" /> },
   ] as const;
@@ -29,7 +31,7 @@ function AppContent() {
   const filterOptions = [
     { id: "this", label: weekRanges.thisWeek.label },
     { id: "last", label: weekRanges.lastWeek.label },
-    { id: "all", label: "전체 기간 (금주+전주 합산)" },
+    { id: "all", label: "전체 기간 (전체 데이터)" },
   ] as const;
 
   return (
@@ -102,6 +104,7 @@ function AppContent() {
             <div key={activeTab}>
               {activeTab === "metrics" && <WeeklyMetricsTab />}
               {activeTab === "products" && <ProductStatusTab />}
+              {activeTab === "incidents" && <AccidentIncidentsTab />}
               {activeTab === "voc" && <VOCAnaTab />}
               {activeTab === "archive" && <ReviewArchiveTab />}
             </div>

@@ -1,8 +1,10 @@
 import React, { useState, useMemo } from "react";
 import { Review } from "../data/classifiedReviews";
-import { Star, Filter, ArrowUpDown, RefreshCw, MessageSquare, ShieldCheck, HelpCircle, AlertOctagon, Calendar, ChevronDown, ChevronUp, Database, Plus, Check, Loader2, Download } from "lucide-react";
+import { Star, Filter, ArrowUpDown, RefreshCw, MessageSquare, ShieldCheck, HelpCircle, AlertOctagon, Calendar, ChevronDown, ChevronUp, Database, Plus, Check, Loader2, Download, Search, Upload, FileSpreadsheet, FileText, Sparkles, CheckCircle2, AlertCircle, ArrowRight, Eye, Trash2, BarChart2, PieChart, AlertTriangle } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
-import { useReviews, getGroupKeysMap } from "../context/ReviewsContext";
+import { useReviews, getGroupKeysMap, findIntegrityIssues, getDeduplicatedReviews, areReviewsSamePost } from "../context/ReviewsContext";
+import { rawReviewsCSV } from "../data/rawReviews";
+import { parseCSVToReviews, parseCSVToIncidents, detectCSVType, CSVParseResult } from "../utils/csvParser";
 
 export default function ReviewArchiveTab() {
   const { 
@@ -11,15 +13,31 @@ export default function ReviewArchiveTab() {
     isUsingLocalData, 
     syncWithFirestore, 
     addReview, 
-    isSyncing 
+    isSyncing,
+    importParsedReviews,
+    importIncidents,
+    resetToInitialData,
+    setActiveTab
   } = useReviews();
 
   // Precompute group keys mapping for all reviews using high-precision similarity logic
   const groupKeysMap = useMemo(() => getGroupKeysMap(reviewsData), [reviewsData]);
 
+  // Data Integrity Audit States
+  const [showIntegrityPanel, setShowIntegrityPanel] = useState(false);
+  const [integritySuccessMsg, setIntegritySuccessMsg] = useState<string | null>(null);
+  const integrityIssues = useMemo(() => findIntegrityIssues(reviewsData), [reviewsData]);
+
+  const handleFixIntegrity = async () => {
+    const deduplicated = getDeduplicatedReviews(reviewsData);
+    await importParsedReviews(deduplicated, false);
+    setIntegritySuccessMsg(`정합성 보정이 완료되었습니다! 동일 내용의 리뷰 ${reviewsData.length - deduplicated.length}건이 단건으로 통합 및 작성자 명칭이 수렴되었습니다.`);
+  };
+
   // States
   const [selectedType, setSelectedType] = useState<"전체" | "추천" | "중립" | "비추천">("전체");
   const [selectedCategory, setSelectedCategory] = useState<string>("전체");
+  const [searchTarget, setSearchTarget] = useState<"전체" | "리뷰내용" | "상품명" | "리뷰어">("전체");
   const [searchQuery, setSearchQuery] = useState("");
   const [sortBy, setSortBy] = useState<"id-desc" | "id-asc" | "rating-desc" | "rating-asc">("id-desc");
   const [visibleCount, setVisibleCount] = useState(12);
@@ -41,6 +59,111 @@ export default function ReviewArchiveTab() {
   const [newReviewText, setNewReviewText] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitSuccess, setSubmitSuccess] = useState(false);
+
+  // CSV Importer & Parser States
+  const [showCSVPanel, setShowCSVPanel] = useState(false);
+  const [csvRawInput, setCsvRawInput] = useState("");
+  const [parsedCSVResult, setParsedCSVResult] = useState<CSVParseResult | null>(null);
+  const [importMode, setImportMode] = useState<"append" | "replace">("append");
+  const [isParsingCSV, setIsParsingCSV] = useState(false);
+  const [csvImportSuccess, setCsvImportSuccess] = useState<string | null>(null);
+  const [isDragOver, setIsDragOver] = useState(false);
+  const [activeInputTab, setActiveInputTab] = useState<"file" | "sample" | "paste" | "api">("file");
+  const [selectedFileName, setSelectedFileName] = useState<string | null>(null);
+
+  // CSV File Upload Handler
+  const handleCSVFileChange = async (file: File) => {
+    if (!file) return;
+    if (!file.name.toLowerCase().endsWith(".csv") && file.type !== "text/csv") {
+      alert("CSV 파일(.csv) 형식만 업로드 가능합니다.");
+      return;
+    }
+    setSelectedFileName(file.name);
+    setIsParsingCSV(true);
+
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      const text = e.target?.result as string;
+      if (text) {
+        setCsvRawInput(text);
+        const csvType = detectCSVType(text);
+        if (csvType === "incidents") {
+          const incResult = parseCSVToIncidents(text);
+          setIsParsingCSV(false);
+          if (confirm(`업로드하신 파일은 'CS 사고접수' 전용 CSV 데이터(${incResult.validCount}건)로 감지되었습니다.\n\n사진 후기 데이터와 분리된 '사고접수 현황' 전용 파이프라인으로 안전하게 반영하시겠습니까?`)) {
+            await importIncidents(incResult.incidents, true);
+            setActiveTab("incidents");
+            setShowCSVPanel(false);
+            return;
+          }
+        }
+        const result = parseCSVToReviews(text);
+        setParsedCSVResult(result);
+      }
+      setIsParsingCSV(false);
+    };
+    reader.onerror = () => {
+      alert("파일을 읽는 중 오류가 발생했습니다.");
+      setIsParsingCSV(false);
+    };
+    reader.readAsText(file, "UTF-8");
+  };
+
+  // Load Sample CSV Handler
+  const handleLoadSampleCSV = () => {
+    setIsParsingCSV(true);
+    setSelectedFileName("honestflower_raw_reviews_sample.csv");
+    setCsvRawInput(rawReviewsCSV);
+    const result = parseCSVToReviews(rawReviewsCSV);
+    setParsedCSVResult(result);
+    setIsParsingCSV(false);
+  };
+
+  // Parse Pasted Text Handler
+  const handleParsePastedText = async () => {
+    if (!csvRawInput.trim()) {
+      alert("파싱할 CSV 텍스트를 입력해주세요.");
+      return;
+    }
+    setIsParsingCSV(true);
+    setSelectedFileName("직접 입력된 CSV 데이터");
+
+    const csvType = detectCSVType(csvRawInput);
+    if (csvType === "incidents") {
+      const incResult = parseCSVToIncidents(csvRawInput);
+      setIsParsingCSV(false);
+      if (confirm(`입력하신 텍스트는 'CS 사고접수' CSV 데이터(${incResult.validCount}건)로 감지되었습니다.\n\n사진 후기 데이터와 분리된 '사고접수 현황' 전용 파이프라인으로 안전하게 반영하시겠습니까?`)) {
+        await importIncidents(incResult.incidents, true);
+        setActiveTab("incidents");
+        setShowCSVPanel(false);
+        return;
+      }
+    }
+
+    const result = parseCSVToReviews(csvRawInput);
+    setParsedCSVResult(result);
+    setIsParsingCSV(false);
+  };
+
+  // Apply to Dashboard Handler
+  const handleApplyCSVToDashboard = async () => {
+    if (!parsedCSVResult || parsedCSVResult.reviews.length === 0) {
+      alert("파싱된 리뷰 데이터가 없습니다.");
+      return;
+    }
+    try {
+      setIsParsingCSV(true);
+      await importParsedReviews(parsedCSVResult.reviews, importMode === "append");
+      setCsvImportSuccess(`CSV 리뷰 데이터 ${parsedCSVResult.reviews.length}건이 성공적으로 파싱되어 상태에 저장되었습니다! 대시보드 지표 및 분석 탭에서 즉시 확인 가능합니다.`);
+      setParsedCSVResult(null);
+      setCsvRawInput("");
+      setSelectedFileName(null);
+    } catch (err) {
+      alert("대시보드 반영 중 오류가 발생했습니다: " + (err as Error).message);
+    } finally {
+      setIsParsingCSV(false);
+    }
+  };
 
   // Constants
   const categories = ["전체", "품질/상태", "배송/포장", "상품구성/양", "서비스/시스템"];
@@ -128,10 +251,29 @@ export default function ReviewArchiveTab() {
     // 3. Search query
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
-      list = list.filter(r => 
-        r.review.toLowerCase().includes(q) || 
-        r.product.toLowerCase().includes(q)
-      );
+      list = list.filter(r => {
+        const reviewText = (r.review || "").toLowerCase();
+        const productName = (r.product || "").toLowerCase();
+        const reviewerName = (r.reviewer || "").toLowerCase();
+        const customerIdText = `고객#${r.id}`.toLowerCase();
+
+        if (searchTarget === "리뷰내용") {
+          return reviewText.includes(q);
+        }
+        if (searchTarget === "상품명") {
+          return productName.includes(q);
+        }
+        if (searchTarget === "리뷰어") {
+          return reviewerName.includes(q) || customerIdText.includes(q);
+        }
+        // "전체"
+        return (
+          reviewText.includes(q) ||
+          productName.includes(q) ||
+          reviewerName.includes(q) ||
+          customerIdText.includes(q)
+        );
+      });
     }
 
     // 3.5 Filter by Date (Dropdown or Calendar Range)
@@ -240,7 +382,7 @@ export default function ReviewArchiveTab() {
     });
 
     return list;
-  }, [reviewsData, selectedType, selectedCategory, searchQuery, sortBy, selectedYear, selectedMonth, selectedDay, dateFilterType, calendarStart, calendarEnd]);
+  }, [reviewsData, selectedType, selectedCategory, searchTarget, searchQuery, sortBy, selectedYear, selectedMonth, selectedDay, dateFilterType, calendarStart, calendarEnd]);
 
   // Dynamic badge counts based on CURRENT filter status (or overall)
   const statsCounts = useMemo(() => {
@@ -256,6 +398,7 @@ export default function ReviewArchiveTab() {
   const resetFilters = () => {
     setSelectedType("전체");
     setSelectedCategory("전체");
+    setSearchTarget("전체");
     setSearchQuery("");
     setSortBy("id-desc");
     setSelectedYear("전체");
@@ -381,6 +524,9 @@ export default function ReviewArchiveTab() {
 
   // Star elements generator
   const renderStars = (rating: number) => {
+    if (rating <= 0) {
+      return <span className="text-[11px] font-medium text-slate-400 bg-slate-100 px-2 py-0.5 rounded-md">평점 없음 (CS 접수건)</span>;
+    }
     const stars = [];
     for (let i = 1; i <= 5; i++) {
       stars.push(
@@ -408,10 +554,10 @@ export default function ReviewArchiveTab() {
       transition={{ duration: 0.4 }}
       className="space-y-6"
     >
-      {/* 0. Database Control & Setup Banner */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+      {/* 0. Database Control & CSV Setup Banner */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
         {/* Sync Status Banner */}
-        <div className={`md:col-span-2 rounded-3xl p-6 border flex flex-col justify-between shadow-sm transition ${
+        <div className={`rounded-3xl p-6 border flex flex-col justify-between shadow-sm transition ${
           isUsingLocalData 
             ? "bg-amber-50/50 border-amber-200 text-amber-900" 
             : "bg-blue-50/40 border-blue-100 text-slate-800"
@@ -420,7 +566,7 @@ export default function ReviewArchiveTab() {
             <div className="flex items-center gap-2 mb-2">
               <Database className={`h-5 w-5 ${isUsingLocalData ? "text-amber-500" : "text-blue-600"}`} />
               <h3 className="font-bold text-sm">
-                {isUsingLocalData ? "데이터베이스 초기 동기화 필요" : "Cloud Firestore 실시간 연동 중"}
+                {isUsingLocalData ? "데이터베이스 로컬 모드" : "Cloud Firestore 실시간 연동 중"}
               </h3>
               <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[9px] font-bold ${
                 isUsingLocalData ? "bg-amber-100 text-amber-800" : "bg-blue-100 text-blue-800"
@@ -430,28 +576,56 @@ export default function ReviewArchiveTab() {
             </div>
             <p className="text-xs leading-relaxed text-slate-500 font-medium">
               {isUsingLocalData 
-                ? "현재 Firestore가 비어있어 로컬 캐시 데이터를 조회 중입니다. 단 한 번의 클릭으로 200여 건의 고품질 분석 후기 데이터를 Firestore 클라우드 데이터베이스에 즉시 동기화(시딩)할 수 있습니다." 
-                : `현재 Google Cloud Firestore의 'reviews' 컬렉션에 완벽하게 바인딩되어 실시간 데이터 연동 중입니다. (총 ${reviewsData.length}건 로드됨) 리뷰를 작성하면 화면 고침 없이 실시간(onSnapshot)으로 대시보드 전체가 업데이트됩니다.`
+                ? "현재 Firestore 연결 대기 중입니다. 클릭하여 클라우드 DB로 동기화하거나 아래 CSV 파싱기를 이용해 자체 후기 데이터셋을 상태에 로드할 수 있습니다." 
+                : `현재 Google Cloud Firestore의 'reviews' 컬렉션에 바인딩되어 실시간 데이터 연동 중입니다. (총 ${reviewsData.length}건 저장됨)`
               }
             </p>
           </div>
 
+          {!isUsingLocalData && (
+            <div className="mt-4 flex gap-2">
+              <button
+                onClick={() => {
+                  if (confirm("CSV 업로드 이전의 원본 기본 데이터셋으로 되돌리시겠습니까?\n업로드된 CSV 및 커스텀 데이터가 초기화됩니다.")) {
+                    resetToInitialData();
+                  }
+                }}
+                disabled={isSyncing}
+                className="w-full inline-flex items-center justify-center gap-1.5 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-800 px-3 py-2 text-xs font-bold transition disabled:opacity-50 cursor-pointer shadow-sm"
+              >
+                <RefreshCw className="h-3.5 w-3.5" />
+                <span>업로드 전 초기 데이터로 되돌리기</span>
+              </button>
+            </div>
+          )}
           {isUsingLocalData && (
-            <div className="mt-4">
+            <div className="mt-4 flex flex-col gap-2">
+              <button
+                onClick={() => {
+                  if (confirm("CSV 업로드 이전의 원본 기본 데이터셋으로 되돌리시겠습니까?")) {
+                    resetToInitialData();
+                  }
+                }}
+                disabled={isSyncing}
+                className="w-full inline-flex items-center justify-center gap-1.5 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-800 px-3 py-2 text-xs font-bold transition disabled:opacity-50 cursor-pointer shadow-sm"
+              >
+                <RefreshCw className="h-3.5 w-3.5" />
+                <span>업로드 전 초기 데이터로 되돌리기</span>
+              </button>
               <button
                 onClick={syncWithFirestore}
                 disabled={isSyncing}
-                className="inline-flex items-center gap-2 rounded-xl bg-amber-600 px-4 py-2.5 text-xs font-bold text-white hover:bg-amber-700 transition disabled:opacity-50 cursor-pointer shadow-sm"
+                className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-amber-600 px-4 py-2.5 text-xs font-bold text-white hover:bg-amber-700 transition disabled:opacity-50 cursor-pointer shadow-sm"
               >
                 {isSyncing ? (
                   <>
                     <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    <span>Firestore 클라우드 동기화 중...</span>
+                    <span>Firestore 동기화 중...</span>
                   </>
                 ) : (
                   <>
                     <RefreshCw className="h-3.5 w-3.5" />
-                    <span>전체 데이터 Firestore로 마이그레이션 (1회성)</span>
+                    <span>Firestore 클라우드 마이그레이션</span>
                   </>
                 )}
               </button>
@@ -459,31 +633,586 @@ export default function ReviewArchiveTab() {
           )}
         </div>
 
-        {/* Live Adding Action Trigger */}
-        <div className="rounded-3xl p-6 border border-slate-100 bg-white flex flex-col justify-between shadow-sm">
+        {/* CSV File Parser & VOC Classifier Card */}
+        <div className="rounded-3xl p-6 border border-emerald-100 bg-emerald-50/30 flex flex-col justify-between shadow-sm">
           <div>
             <div className="flex items-center gap-2 mb-2">
-              <div className="rounded-lg bg-blue-50 p-1.5 text-blue-600">
-                <Plus className="h-4 w-4" />
+              <div className="rounded-lg bg-emerald-100/80 p-1.5 text-emerald-700">
+                <FileSpreadsheet className="h-4 w-4" />
               </div>
-              <h3 className="font-bold text-sm text-slate-900">실시간 데이터 갱신 테스트</h3>
+              <h3 className="font-bold text-sm text-emerald-950">CSV 파싱 & 어드민 API</h3>
+              <span className="inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-[9px] font-bold text-emerald-800">
+                VOC 가이드 자동분류
+              </span>
             </div>
-            <p className="text-xs leading-relaxed text-slate-400 font-medium">
-              새로운 고객 후기(VOC)를 가상으로 추가하고, 해당 내용이 대시보드 지표 및 원본 아카이브에 실시간으로 자동 분류·반영되는 과정을 테스트해 볼 수 있습니다.
+            <p className="text-xs leading-relaxed text-emerald-800/80 font-medium">
+              CSV 파일 데이터를 파싱하거나 어드민 REST/웹훅 API 명세를 통해 대시보드 상태에 실시간 동기화합니다.
             </p>
           </div>
 
           <div className="mt-4">
             <button
-              onClick={() => setShowAddForm(!showAddForm)}
-              className="w-full inline-flex items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 px-4 py-2.5 text-xs font-bold transition cursor-pointer"
+              onClick={() => {
+                setShowCSVPanel(!showCSVPanel);
+                if (showAddForm) setShowAddForm(false);
+                if (showIntegrityPanel) setShowIntegrityPanel(false);
+              }}
+              className="w-full inline-flex items-center justify-center gap-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2.5 text-xs font-bold transition shadow-sm cursor-pointer"
             >
-              <Plus className="h-3.5 w-3.5" />
-              <span>새로운 후기 추가 폼 {showAddForm ? "닫기" : "열기"}</span>
+              <Upload className="h-3.5 w-3.5" />
+              <span>CSV 파싱 및 임포터 도구 {showCSVPanel ? "닫기" : "열기"}</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Data Integrity Audit & Deduplication Engine Card */}
+        <div className="rounded-3xl p-6 border border-indigo-100 bg-indigo-50/30 flex flex-col justify-between shadow-sm">
+          <div>
+            <div className="flex items-center gap-2 mb-2">
+              <div className="rounded-lg bg-indigo-100 p-1.5 text-indigo-700">
+                <ShieldCheck className="h-4 w-4" />
+              </div>
+              <h3 className="font-bold text-sm text-indigo-950">리뷰 데이터 정합성 모니터링</h3>
+              <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[9px] font-bold ${
+                integrityIssues.length > 0 ? "bg-rose-100 text-rose-800" : "bg-indigo-100 text-indigo-800"
+              }`}>
+                {integrityIssues.length > 0 ? `이슈 ${integrityIssues.length}건` : "정합성 정상"}
+              </span>
+            </div>
+            <p className="text-xs leading-relaxed text-indigo-900/80 font-medium">
+              동일 후기 내용인데 작성자명이 다르게 파싱되었거나 중복 등록된 데이터 정합성 이슈를 진단하고 자동 보정합니다.
+            </p>
+          </div>
+
+          <div className="mt-4">
+            <button
+              onClick={() => {
+                setShowIntegrityPanel(!showIntegrityPanel);
+                if (showCSVPanel) setShowCSVPanel(false);
+                if (showAddForm) setShowAddForm(false);
+              }}
+              className="w-full inline-flex items-center justify-center gap-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2.5 text-xs font-bold transition shadow-sm cursor-pointer"
+            >
+              <Sparkles className="h-3.5 w-3.5" />
+              <span>정합성 검사 및 자동 보정 {showIntegrityPanel ? "닫기" : "열기"}</span>
             </button>
           </div>
         </div>
       </div>
+
+      {/* Data Integrity Audit Panel Component */}
+      <AnimatePresence>
+        {showIntegrityPanel && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            className="overflow-hidden"
+          >
+            <div className="rounded-3xl border border-indigo-200 bg-indigo-50/20 p-6 shadow-sm space-y-5">
+              <div className="flex items-center justify-between border-b border-indigo-100 pb-4">
+                <div className="flex items-center gap-2.5">
+                  <div className="rounded-xl bg-indigo-600 p-2 text-white shadow-sm">
+                    <ShieldCheck className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                      리뷰 데이터 정합성 검사 및 동일 후기/리뷰어 자동 보정 도구
+                      <span className="text-[10px] font-bold bg-indigo-100 text-indigo-800 px-2 py-0.5 rounded-md">
+                        Data Integrity Audit Engine
+                      </span>
+                    </h4>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      어드민 DB / CSV 내보내기 시 동일한 리뷰 내용(`review`)에 대해 리뷰어명(`reviewer`)이 다르게 생성되었거나 다중 이미지 행으로 중복 등록된 항목을 진단 및 자동 보정합니다.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setShowIntegrityPanel(false)}
+                  className="text-xs text-slate-400 hover:text-slate-600 font-bold px-3 py-1 rounded-lg hover:bg-slate-100 transition cursor-pointer"
+                >
+                  닫기 ✕
+                </button>
+              </div>
+
+              {integritySuccessMsg && (
+                <div className="rounded-xl bg-emerald-50 border border-emerald-200 p-3 text-xs font-bold text-emerald-800 flex items-center gap-2">
+                  <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+                  <span>{integritySuccessMsg}</span>
+                </div>
+              )}
+
+              <div className="space-y-4">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 bg-white p-4 rounded-2xl border border-indigo-100 shadow-2xs">
+                  <div>
+                    <span className="text-xs font-bold text-slate-800">
+                      진단 결과: {integrityIssues.length > 0 ? `총 ${integrityIssues.length}건의 동일 내용/리뷰어 불일치 및 중복 건 발견` : "데이터 정합성 이상 없음 (모든 리뷰 정상)"}
+                    </span>
+                    <p className="text-[11px] text-slate-500 mt-0.5">
+                      원인 분석: 동일 날짜/상품에 수집된 리뷰 중 텍스트가 100% 동일하지만 작성자 마스킹(`id % 20`) 차이로 다른 이름이 할당된 케이스
+                    </p>
+                  </div>
+                  {integrityIssues.length > 0 && (
+                    <button
+                      onClick={handleFixIntegrity}
+                      className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 text-xs font-bold transition shadow-sm cursor-pointer shrink-0"
+                    >
+                      <Sparkles className="h-3.5 w-3.5" />
+                      <span>1-클릭 정합성 자동 보정 (중복 단건 통합 & 리뷰어 통일)</span>
+                    </button>
+                  )}
+                </div>
+
+                {integrityIssues.length > 0 && (
+                  <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
+                    {integrityIssues.map((issue, idx) => (
+                      <div key={idx} className="bg-white border border-indigo-100 rounded-xl p-3 text-xs space-y-1.5">
+                        <div className="flex items-center justify-between">
+                          <span className="font-bold text-indigo-900 bg-indigo-50 px-2 py-0.5 rounded text-[10px]">
+                            {issue.date} | {issue.product}
+                          </span>
+                          <span className="text-[10px] text-indigo-600 font-semibold">
+                            중복 감지: {issue.reviews.length}건 (통합 작성자: {issue.suggestedReviewer})
+                          </span>
+                        </div>
+                        <p className="text-slate-700 font-medium text-[11px] italic bg-slate-50 p-2 rounded">
+                          "{issue.reviewText}"
+                        </p>
+                        <div className="flex items-center gap-2 text-[10px] text-slate-500">
+                          <span>감지된 작성자 명칭:</span>
+                          {issue.reviews.map(r => (
+                            <span key={r.id} className="bg-slate-100 border border-slate-200 px-1.5 py-0.5 rounded font-mono">
+                              {r.reviewer || `고객#${r.id}`}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* CSV Importer & Parser Panel Component */}
+      <AnimatePresence>
+        {showCSVPanel && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            className="overflow-hidden"
+          >
+            <div className="rounded-3xl border border-emerald-200 bg-emerald-50/20 p-6 shadow-sm space-y-5">
+              <div className="flex items-center justify-between border-b border-emerald-100 pb-4">
+                <div className="flex items-center gap-2.5">
+                  <div className="rounded-xl bg-emerald-600 p-2 text-white shadow-sm">
+                    <FileSpreadsheet className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                      CSV 데이터 파싱 및 VOC 분류 엔진
+                      <span className="text-[10px] font-bold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-md">
+                        ReviewArchiveTab State Engine
+                      </span>
+                    </h4>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      업로드된 CSV의 항목(id, 작성일, 상품명, 평점, 후기내용)을 파싱하여 어니스트플라워 가이드라인 기반으로 카테고리/담당부서를 자동 분류 및 상태 저장합니다.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setShowCSVPanel(false)}
+                  className="text-xs text-slate-400 hover:text-slate-600 font-bold px-3 py-1 rounded-lg hover:bg-slate-100 transition"
+                >
+                  닫기 ✕
+                </button>
+              </div>
+
+              {/* Input Mode Tabs */}
+              <div className="flex items-center gap-2 border-b border-slate-200/60 pb-3">
+                <button
+                  onClick={() => setActiveInputTab("file")}
+                  className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${
+                    activeInputTab === "file"
+                      ? "bg-emerald-600 text-white shadow-sm"
+                      : "bg-white text-slate-600 hover:bg-slate-100 border border-slate-200"
+                  }`}
+                >
+                  <Upload className="h-3.5 w-3.5" />
+                  <span>CSV 파일 업로드 (드래그앤드롭)</span>
+                </button>
+                <button
+                  onClick={() => setActiveInputTab("sample")}
+                  className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${
+                    activeInputTab === "sample"
+                      ? "bg-emerald-600 text-white shadow-sm"
+                      : "bg-white text-slate-600 hover:bg-slate-100 border border-slate-200"
+                  }`}
+                >
+                  <Sparkles className="h-3.5 w-3.5" />
+                  <span>원천 샘플 CSV (200여건) 1-클릭 로드</span>
+                </button>
+                <button
+                  onClick={() => setActiveInputTab("paste")}
+                  className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${
+                    activeInputTab === "paste"
+                      ? "bg-emerald-600 text-white shadow-sm"
+                      : "bg-white text-slate-600 hover:bg-slate-100 border border-slate-200"
+                  }`}
+                >
+                  <FileText className="h-3.5 w-3.5" />
+                  <span>CSV 텍스트 직접 붙여넣기</span>
+                </button>
+                <button
+                  onClick={() => setActiveInputTab("api")}
+                  className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${
+                    activeInputTab === "api"
+                      ? "bg-indigo-600 text-white shadow-sm"
+                      : "bg-white text-indigo-700 hover:bg-indigo-50 border border-indigo-200"
+                  }`}
+                >
+                  <Database className="h-3.5 w-3.5" />
+                  <span>자사 어드민 API 연동 설계 (Future Integration)</span>
+                </button>
+              </div>
+
+              {/* File Upload Mode */}
+              {activeInputTab === "file" && (
+                <div
+                  onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
+                  onDragLeave={() => setIsDragOver(false)}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    setIsDragOver(false);
+                    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+                      handleCSVFileChange(e.dataTransfer.files[0]);
+                    }
+                  }}
+                  className={`relative rounded-2xl border-2 border-dashed p-8 text-center transition ${
+                    isDragOver 
+                      ? "border-emerald-500 bg-emerald-100/50 scale-[0.99]" 
+                      : "border-emerald-300 bg-white hover:border-emerald-400"
+                  }`}
+                >
+                  <input
+                    type="file"
+                    accept=".csv"
+                    onChange={(e) => {
+                      if (e.target.files && e.target.files[0]) {
+                        handleCSVFileChange(e.target.files[0]);
+                      }
+                    }}
+                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                  />
+                  <div className="flex flex-col items-center justify-center gap-2 pointer-events-none">
+                    <div className="rounded-full bg-emerald-100 p-3 text-emerald-600">
+                      <Upload className="h-6 w-6" />
+                    </div>
+                    <p className="text-sm font-bold text-slate-800">
+                      CSV 파일을 이곳에 끌어다 놓거나 클릭하여 선택하세요
+                    </p>
+                    <p className="text-xs text-slate-400">
+                      지원 형식: UTF-8 인코딩된 .csv 파일 (열 헤더: id, 작성일, 상품명, 평점, 후기내용 등)
+                    </p>
+                    {selectedFileName && (
+                      <div className="mt-2 inline-flex items-center gap-2 rounded-lg bg-emerald-50 border border-emerald-200 px-3 py-1.5 text-xs font-bold text-emerald-900">
+                        <FileSpreadsheet className="h-4 w-4 text-emerald-600" />
+                        <span>선택된 파일: {selectedFileName}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Sample Loader Mode */}
+              {activeInputTab === "sample" && (
+                <div className="rounded-2xl bg-white border border-slate-200 p-6 space-y-4">
+                  <div className="flex items-start gap-3">
+                    <div className="rounded-lg bg-blue-50 p-2 text-blue-600">
+                      <Sparkles className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <h5 className="text-xs font-bold text-slate-900">내장 원천 rawReviewsCSV 데이터셋 (200여건)</h5>
+                      <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                        `src/data/rawReviews.ts`에 내장된 실제 어니스트플라워 고객 VOC 파이프라인 CSV 원천 데이터를 1-클릭으로 자동 파싱합니다.
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={handleLoadSampleCSV}
+                    disabled={isParsingCSV}
+                    className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2.5 text-xs font-bold transition shadow-sm cursor-pointer disabled:opacity-50"
+                  >
+                    {isParsingCSV ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileSpreadsheet className="h-4 w-4" />}
+                    <span>원천 CSV 데이터 파싱 실행</span>
+                  </button>
+                </div>
+              )}
+
+              {/* Paste Text Mode */}
+              {activeInputTab === "paste" && (
+                <div className="space-y-3">
+                  <textarea
+                    rows={6}
+                    value={csvRawInput}
+                    onChange={(e) => setCsvRawInput(e.target.value)}
+                    placeholder="id,date,product,rating,review,type,category&#10;1,2026.06.25,거베라,1,거베라 고개가 축 처져서 왔어요,,&#10;2,2026.06.25,플라워 럭키박스,5,구성 풍성하고 너무 예뻐요,추천,상품구성/양"
+                    className="w-full rounded-2xl border border-slate-200 bg-white p-4 text-xs font-mono text-slate-800 placeholder-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                  <div className="flex justify-end">
+                    <button
+                      onClick={handleParsePastedText}
+                      disabled={isParsingCSV || !csvRawInput.trim()}
+                      className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2.5 text-xs font-bold transition shadow-sm cursor-pointer disabled:opacity-50"
+                    >
+                      {isParsingCSV ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
+                      <span>입력한 CSV 텍스트 파싱 및 분석</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* API Integration Direct Sync Mode */}
+              {activeInputTab === "api" && (
+                <div className="rounded-2xl bg-white border border-indigo-200 p-6 space-y-5 shadow-2xs">
+                  <div className="flex items-start justify-between border-b border-indigo-100 pb-4">
+                    <div className="flex items-center gap-3">
+                      <div className="rounded-xl bg-indigo-100 p-2 text-indigo-700">
+                        <Database className="h-5 w-5" />
+                      </div>
+                      <div>
+                        <h5 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                          어니스트플라워 자사 어드민 API 자동 연동 파이프라인
+                          <span className="text-[10px] font-bold bg-indigo-100 text-indigo-800 px-2 py-0.5 rounded-full">
+                            RESTful / Webhook API Spec
+                          </span>
+                        </h5>
+                        <p className="text-xs text-slate-500 mt-0.5">
+                          CSV 수동 업로드 대신 자사 어드민 백엔드 REST API 또는 웹훅(Webhook)을 통해 실시간 동기화하기 위한 명세 및 가이드입니다.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                    <div className="rounded-xl bg-slate-50 border border-slate-200 p-4 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-slate-800">1. REST API 주기적 동기화 (Polling)</span>
+                        <span className="text-[10px] font-bold bg-slate-200 text-slate-700 px-2 py-0.5 rounded">GET /api/v1/admin/reviews</span>
+                      </div>
+                      <p className="text-slate-500 text-[11px] leading-relaxed">
+                        자사 어드민 서버에 수집되는 최신 고객 VOC 및 후기 목록을 JSON 엔드포인트로 제공받아 대시보드로 주기적 동기화합니다.
+                      </p>
+                      <div className="bg-slate-900 text-slate-100 p-2.5 rounded-lg font-mono text-[10px] overflow-x-auto">
+                        {`Authorization: Bearer <ADMIN_API_TOKEN>
+GET https://admin.honestflower.kr/api/v1/voc/reviews?startDate=2026-06-01`}
+                      </div>
+                    </div>
+
+                    <div className="rounded-xl bg-slate-50 border border-slate-200 p-4 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-slate-800">2. 실시간 웹훅 연동 (Real-time Webhook)</span>
+                        <span className="text-[10px] font-bold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded">POST /api/voc/webhook</span>
+                      </div>
+                      <p className="text-slate-500 text-[11px] leading-relaxed">
+                        고객이 자사몰/앱에서 후기를 작성하는 즉시 어드민 이벤트 웹훅이 발송되어 대시보드 및 VOC 분류 엔진에 반영됩니다.
+                      </p>
+                      <div className="bg-slate-900 text-slate-100 p-2.5 rounded-lg font-mono text-[10px] overflow-x-auto">
+                        {`POST /api/voc/webhook
+Content-Type: application/json
+{ "event": "review.created", "data": { "id": 201, "review": "..." } }`}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl bg-indigo-50/60 border border-indigo-100 p-4 flex items-center justify-between">
+                    <div className="space-y-0.5">
+                      <h6 className="text-xs font-bold text-indigo-950">어드민 API 토큰 테스트 mock 콜백</h6>
+                      <p className="text-[11px] text-indigo-700">현재 CSV 파서 모듈과 동일한 `Review` 인터페이스 규격으로 인메모리 연동 준비가 완료되었습니다.</p>
+                    </div>
+                    <button
+                      onClick={() => {
+                        handleLoadSampleCSV();
+                        setActiveInputTab("sample");
+                      }}
+                      className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 text-xs font-bold transition shadow-2xs cursor-pointer"
+                    >
+                      <Sparkles className="h-3.5 w-3.5" />
+                      <span>mock API 데이터 연동 수신 테스트</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Parsed Results Preview Section */}
+              {parsedCSVResult && (
+                <div className="rounded-2xl bg-white border border-emerald-200 p-5 space-y-4 shadow-sm">
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                    <div className="flex items-center gap-2">
+                      <CheckCircle2 className="h-5 w-5 text-emerald-600" />
+                      <h5 className="text-sm font-bold text-slate-900">
+                        CSV 파싱 완료: 총 <span className="text-emerald-600 font-extrabold">{parsedCSVResult.validCount}</span>건 검증됨
+                      </h5>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-2 text-xs font-medium text-slate-600">
+                        <span>적용 방식:</span>
+                        <label className="flex items-center gap-1 cursor-pointer">
+                          <input
+                            type="radio"
+                            name="importMode"
+                            checked={importMode === "append"}
+                            onChange={() => setImportMode("append")}
+                            className="text-emerald-600 focus:ring-emerald-500"
+                          />
+                          <span>기존 병합 (Append)</span>
+                        </label>
+                        <label className="flex items-center gap-1 cursor-pointer ml-2">
+                          <input
+                            type="radio"
+                            name="importMode"
+                            checked={importMode === "replace"}
+                            onChange={() => setImportMode("replace")}
+                            className="text-emerald-600 focus:ring-emerald-500"
+                          />
+                          <span>전체 교체 (Replace)</span>
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Summary Metric Chips */}
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    <div className="rounded-xl bg-slate-50 p-3 border border-slate-100">
+                      <span className="text-[10px] text-slate-400 font-bold block uppercase">파싱 행 수</span>
+                      <span className="text-sm font-bold text-slate-800">{parsedCSVResult.validCount} 건</span>
+                    </div>
+                    <div className="rounded-xl bg-emerald-50/50 p-3 border border-emerald-100">
+                      <span className="text-[10px] text-emerald-600 font-bold block uppercase">VOC가이드 자동 분류</span>
+                      <span className="text-sm font-bold text-emerald-900">{parsedCSVResult.autoClassifiedCount} 건 처리</span>
+                    </div>
+                    <div className="rounded-xl bg-blue-50/50 p-3 border border-blue-100">
+                      <span className="text-[10px] text-blue-600 font-bold block uppercase">수집 기간 Span</span>
+                      <span className="text-xs font-bold text-blue-900">{parsedCSVResult.dateRange.start || "N/A"} ~ {parsedCSVResult.dateRange.end || "N/A"}</span>
+                    </div>
+                    <div className="rounded-xl bg-purple-50/50 p-3 border border-purple-100">
+                      <span className="text-[10px] text-purple-600 font-bold block uppercase">카테고리 구성비</span>
+                      <span className="text-xs font-bold text-purple-900">
+                        품질({parsedCSVResult.categoriesSummary["품질/상태"] || 0}) / 배송({parsedCSVResult.categoriesSummary["배송/포장"] || 0}) / 구성({parsedCSVResult.categoriesSummary["상품구성/양"] || 0})
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Preview Table of First 6 Rows */}
+                  <div className="overflow-x-auto rounded-xl border border-slate-200">
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-slate-50 text-slate-500 font-bold border-b border-slate-200">
+                        <tr>
+                          <th className="py-2.5 px-3">ID</th>
+                          <th className="py-2.5 px-3">작성일</th>
+                          <th className="py-2.5 px-3">상품명</th>
+                          <th className="py-2.5 px-3">평점</th>
+                          <th className="py-2.5 px-3">추천구분</th>
+                          <th className="py-2.5 px-3">VOC 카테고리(자동)</th>
+                          <th className="py-2.5 px-3">담당부서</th>
+                          <th className="py-2.5 px-3">후기 내용 요약</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 bg-white">
+                        {parsedCSVResult.reviews.slice(0, 6).map((item) => (
+                          <tr key={item.id} className="hover:bg-slate-50/80">
+                            <td className="py-2 px-3 font-mono text-slate-400">#{item.id}</td>
+                            <td className="py-2 px-3 font-medium text-slate-700">{item.date}</td>
+                            <td className="py-2 px-3 font-bold text-slate-900 max-w-[120px] truncate">{item.product}</td>
+                            <td className="py-2 px-3 text-amber-500 font-bold">★ {item.rating}</td>
+                            <td className="py-2 px-3">
+                              <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold ${
+                                item.type === "추천" ? "bg-emerald-100 text-emerald-800" :
+                                item.type === "중립" ? "bg-slate-100 text-slate-700" : "bg-rose-100 text-rose-800"
+                              }`}>
+                                {item.type}
+                              </span>
+                            </td>
+                            <td className="py-2 px-3">
+                              <span className="inline-block px-2 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-100">
+                                {item.category}
+                              </span>
+                            </td>
+                            <td className="py-2 px-3 text-slate-500 text-[11px] font-medium">{item.department}</td>
+                            <td className="py-2 px-3 text-slate-600 max-w-[200px] truncate">{item.review}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* Main Action Button */}
+                  <div className="pt-2 flex items-center justify-between">
+                    <button
+                      onClick={() => setParsedCSVResult(null)}
+                      className="text-xs text-slate-400 hover:text-slate-600 font-bold px-3 py-2 rounded-xl transition"
+                    >
+                      취소
+                    </button>
+                    <button
+                      onClick={handleApplyCSVToDashboard}
+                      disabled={isParsingCSV}
+                      className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white px-6 py-3 text-xs font-bold transition shadow-md cursor-pointer"
+                    >
+                      {isParsingCSV ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+                      <span>ReviewArchiveTab 상태로 저장 및 대시보드 전체에 반영 ({parsedCSVResult.validCount}건)</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Success Notification Banner */}
+              {csvImportSuccess && (
+                <motion.div
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="rounded-2xl bg-emerald-600 text-white p-5 shadow-sm space-y-3"
+                >
+                  <div className="flex items-center gap-3">
+                    <CheckCircle2 className="h-6 w-6 text-white shrink-0" />
+                    <div>
+                      <h5 className="font-bold text-sm">파싱 및 대시보드 상태 저장 완료!</h5>
+                      <p className="text-xs text-emerald-100 mt-0.5">{csvImportSuccess}</p>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-2 pt-1 border-t border-emerald-500">
+                    <span className="text-[11px] text-emerald-100 self-center font-bold mr-1">즉시 분석 탭으로 이동:</span>
+                    <button
+                      onClick={() => setActiveTab("metrics")}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/20 hover:bg-white/30 text-white text-xs font-bold transition cursor-pointer"
+                    >
+                      <BarChart2 className="h-3.5 w-3.5" />
+                      <span>주간 핵심 지표 탭</span>
+                    </button>
+                    <button
+                      onClick={() => setActiveTab("products")}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/20 hover:bg-white/30 text-white text-xs font-bold transition cursor-pointer"
+                    >
+                      <BarChart2 className="h-3.5 w-3.5" />
+                      <span>상품별 현황 탭</span>
+                    </button>
+                    <button
+                      onClick={() => setActiveTab("voc")}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/20 hover:bg-white/30 text-white text-xs font-bold transition cursor-pointer"
+                    >
+                      <PieChart className="h-3.5 w-3.5" />
+                      <span>VOC 카테고리 분석 탭</span>
+                    </button>
+                  </div>
+                </motion.div>
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Add Review Form Component */}
       <AnimatePresence>
@@ -612,17 +1341,38 @@ export default function ReviewArchiveTab() {
         
         {/* Row 1: Search & Sort & Reset */}
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <div className="relative flex-1 max-w-lg">
-            <input
-              type="text"
-              placeholder="리뷰 내용 또는 상품명 검색..."
-              value={searchQuery}
+          <div className="flex items-center gap-1.5 flex-1 max-w-xl">
+            <select
+              value={searchTarget}
               onChange={(e) => {
-                setSearchQuery(e.target.value);
-                setVisibleCount(12); // Reset visible count on search
+                setSearchTarget(e.target.value as any);
+                setVisibleCount(12);
               }}
-              className="w-full pl-4 pr-10 py-2 text-xs rounded-lg border border-slate-200 focus:outline-hidden focus:ring-1 focus:ring-brand-green focus:border-brand-green bg-white"
-            />
+              className="text-xs font-semibold rounded-lg border border-slate-200 bg-slate-50 text-slate-700 px-3 py-2 focus:outline-hidden focus:ring-1 focus:ring-brand-green focus:border-brand-green shrink-0 cursor-pointer hover:bg-slate-100 transition"
+            >
+              <option value="전체">전체 검색</option>
+              <option value="리뷰내용">리뷰 내용</option>
+              <option value="상품명">상품명</option>
+              <option value="리뷰어">리뷰어 (작성자)</option>
+            </select>
+            <div className="relative flex-1">
+              <input
+                type="text"
+                placeholder={
+                  searchTarget === "리뷰내용" ? "리뷰 내용 검색..." :
+                  searchTarget === "상품명" ? "상품명 검색..." :
+                  searchTarget === "리뷰어" ? "리뷰어 이름 또는 고객#번호 검색..." :
+                  "리뷰 내용, 상품명, 리뷰어 검색..."
+                }
+                value={searchQuery}
+                onChange={(e) => {
+                  setSearchQuery(e.target.value);
+                  setVisibleCount(12); // Reset visible count on search
+                }}
+                className="w-full pl-8 pr-4 py-2 text-xs rounded-lg border border-slate-200 focus:outline-hidden focus:ring-1 focus:ring-brand-green focus:border-brand-green bg-white"
+              />
+              <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-400" />
+            </div>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
@@ -937,9 +1687,9 @@ export default function ReviewArchiveTab() {
                 {filteredAndSortedReviews.slice(0, visibleCount).map((item, index, arr) => {
                   const isExpanded = expandedReviewId === item.id;
                   
-                  // Check if this review belongs to the same post (same reviewer, date, and highly similar content) as the previous one
+                  // Check if this review belongs to the same post (same reviewer, date, and identical multi-product review text) as the previous one
                   const prevItem = index > 0 ? arr[index - 1] : null;
-                  const isSamePostAsPrev = prevItem && groupKeysMap.get(item.id) === groupKeysMap.get(prevItem.id);
+                  const isSamePostAsPrev = Boolean(prevItem && areReviewsSamePost(item, prevItem) && item.review && prevItem.review && item.review === prevItem.review);
 
                   let typeLabelColor = "bg-brand-green-light text-brand-green-dark ring-brand-green/20";
                   let typeIcon = <ShieldCheck className="h-3 w-3 text-brand-green" />;
@@ -966,6 +1716,21 @@ export default function ReviewArchiveTab() {
                               <span>
                                 {item.reviewer ? `${item.reviewer}님의 후기` : `고객#${item.id}님의 후기`}
                               </span>
+                              {item.incidentStatus === "처리완료" && (
+                                <span className="inline-flex items-center gap-0.5 rounded-md bg-rose-100 text-rose-800 border border-rose-200 px-1.5 py-0.5 text-[9px] font-extrabold shadow-2xs">
+                                  🚨 사고접수완료
+                                </span>
+                              )}
+                              {item.incidentStatus === "반려됨" && (
+                                <span className="inline-flex items-center gap-0.5 rounded-md bg-slate-100 text-slate-600 border border-slate-200 px-1.5 py-0.5 text-[9px] font-bold">
+                                  사고접수(반려)
+                                </span>
+                              )}
+                              {item.incidentStatus === "접수중" && (
+                                <span className="inline-flex items-center gap-0.5 rounded-md bg-amber-100 text-amber-800 border border-amber-200 px-1.5 py-0.5 text-[9px] font-bold animate-pulse">
+                                  ⏳ 사고접수대기
+                                </span>
+                              )}
                               {item.image_urls && item.image_urls.length > 0 ? (
                                 <div className="inline-flex gap-1 items-center flex-wrap">
                                   {item.image_urls.map((url, imgIdx) => (
@@ -1131,7 +1896,7 @@ export default function ReviewArchiveTab() {
                                 <div className="flex items-center gap-1.5">
                                   <span className="text-[10px] text-slate-400 font-bold">고객 만족도 별점:</span>
                                   {renderStars(item.rating)}
-                                  <span className="text-xs font-bold text-slate-600">({item.rating}점)</span>
+                                  <span className="text-xs font-bold text-slate-600">{item.rating > 0 ? `(${item.rating}점)` : ""}</span>
                                 </div>
                               </div>
 
