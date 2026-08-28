@@ -16,11 +16,16 @@ export interface Review {
   reviewer?: string;
   image_url?: string;
   rawReviewer?: string;
+  rawCustomerId?: string;
   image_urls?: string[];
   incidentStatus?: "처리완료" | "반려됨" | "접수중";
   accidentType?: string;
   accidentDetail?: string;
   refundAmount?: number;
+  // 어드민 CSV의 "노출여부" — 고객에게 공개 노출되는지 여부. false(비공개)로 어드민이 내린 리뷰는
+  // 대개 문제가 있어 숨긴 것이라 오히려 내부 VOC 관점에선 가장 먼저 봐야 할 신호다. undefined는
+  // 컬럼이 없는 CSV(옛 데이터)라 알 수 없음을 뜻하며, 필터링해서 빼면 안 된다.
+  exposed?: boolean;
 }
 
 export interface ProductStat {

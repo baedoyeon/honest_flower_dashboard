@@ -1,19 +1,46 @@
 import React, { createContext, useContext, useState, useEffect, useMemo } from "react";
-import { db } from "../lib/firebase";
-import { collection, onSnapshot, doc, writeBatch, query, orderBy, addDoc, limit, getDocs } from "firebase/firestore";
 import { reviewsData as staticReviews, Review, ProductStat } from "../data/classifiedReviews";
 import { Incident, initialIncidentsData } from "../data/initialIncidents";
+import { OrderItem, initialOrderItemsData } from "../data/orderItems";
+import { ProblemForm, initialProblemFormsData } from "../data/problemForms";
+import { ChatRoom, initialChatRoomsData } from "../data/chatRooms";
+import { CsCostExportRow, DispatchFailureRow } from "../utils/csvParser";
+import { defaultCompanyHolidays } from "../data/companyHolidays";
+import { idbLoad, idbSave } from "../utils/idbStorage";
+import { DEFAULT_MONTHLY_CS_LABOR_COST_ALLOCATION_KRW } from "../utils/chatRoomEngine";
 
 interface ReviewsContextType {
   reviews: Review[];
   weeklyReviews: Review[];
   incidents: Incident[];
   weeklyIncidents: Incident[];
+  orderItems: OrderItem[];
+  importOrderItems: (newItems: OrderItem[], replace?: boolean) => Promise<void>;
+  problemForms: ProblemForm[];
+  importProblemForms: (newItems: ProblemForm[], replace?: boolean) => Promise<void>;
+  chatRooms: ChatRoom[];
+  importChatRooms: (newItems: ChatRoom[], replace?: boolean) => Promise<void>;
+  // "CS비용 검증(선택)" 위젯(ClaimCostTab)에서 업로드한 CS 비용 export — Part D 예측지표의
+  // 건당코스트예상 계산에서 재사용하기 위해 전역으로 끌어올림. 병합/교체 UI 없이 항상 전체 교체.
+  csCostExportRows: CsCostExportRow[];
+  importCsCostExportRows: (rows: CsCostExportRow[]) => void;
+  // "CS 응대 현황" 탭의 영업시간 필터(월~금 10-17시)용 휴무일 캘린더("YYYY-MM-DD"[]) — 코드 재배포 없이
+  // 사용자가 직접 추가/삭제할 수 있도록 localStorage에 저장. 초기값은 defaultCompanyHolidays.
+  companyHolidays: string[];
+  setCompanyHolidays: (dates: string[]) => void;
+  // Part D "26년 예상 건당 코스트" 계산의 분자 — 실측값이 아니라 CS 업무 배분 인건비를 주관적으로
+  // 추산한 월 단위 근사치(옛 시트도 하드코딩 2,000,000원이었음, 사용자 확인 완료). 인건비 인상/업무
+  // 비중 변화로 바뀔 수 있어 코드에 리터럴로 박지 않고 사용자가 수정 가능한 값으로 둔다.
+  monthlyCsLaborCostAllocation: number;
+  setMonthlyCsLaborCostAllocation: (won: number) => void;
+  // Part E "발송불가율(SCM VOC)" — 이미 SQL 단에서 주/월별로 집계된 CSV를 그대로 저장(row-level
+  // 재계산 없음). 데이터량이 작아(3년치라 봐야 주간 150여행) IndexedDB 대신 localStorage로 충분.
+  dispatchFailureWeekly: DispatchFailureRow[];
+  importDispatchFailureWeekly: (rows: DispatchFailureRow[], replace?: boolean) => void;
+  dispatchFailureMonthly: DispatchFailureRow[];
+  importDispatchFailureMonthly: (rows: DispatchFailureRow[], replace?: boolean) => void;
   productStats: ProductStat[];
   isLoading: boolean;
-  isFirestoreEmpty: boolean;
-  isUsingLocalData: boolean;
-  syncWithFirestore: () => Promise<void>;
   addReview: (review: Omit<Review, "id">) => Promise<void>;
   archiveActiveReviews: () => Promise<void>;
   isSyncing: boolean;
@@ -22,17 +49,22 @@ interface ReviewsContextType {
   weekRanges: {
     thisWeek: { start: string; end: string; label: string };
     lastWeek: { start: string; end: string; label: string };
+    // weekFilter === "all" 스코프. 대시보드 전체 업로드 기간이 아니라 "이번주 + 저번주" 2주 합산으로 정의된다.
+    allPeriod: { start: string; end: string; label: string };
   };
-  refreshData: () => Promise<void>;
   resetToInitialData: () => Promise<void>;
-  activeTab: "metrics" | "products" | "incidents" | "voc" | "archive";
-  setActiveTab: (tab: "metrics" | "products" | "incidents" | "voc" | "archive") => void;
+  activeTab: "metrics" | "products" | "incidents" | "voc" | "archive" | "claimcost" | "actionboard" | "csresponse";
+  setActiveTab: (tab: "metrics" | "products" | "incidents" | "voc" | "archive" | "claimcost" | "actionboard" | "csresponse") => void;
   metricsProductFilter: string;
   setMetricsProductFilter: (p: string) => void;
   metricsTypeFilter: "all" | "추천" | "중립" | "비추천" | "사고접수";
   setMetricsTypeFilter: (t: "all" | "추천" | "중립" | "비추천" | "사고접수") => void;
   importParsedReviews: (newReviews: Review[], append?: boolean) => Promise<void>;
   importIncidents: (newIncidents: Incident[], replace?: boolean) => Promise<void>;
+  // 알림센터에서 클릭한 리뷰/사고접수 항목으로 다른 탭에서 스크롤/하이라이트 이동하기 위한 공유 상태
+  // (metricsProductFilter와 동일한 "탭 간 신호" 패턴). 리뷰는 String(Review.id), 사고접수는 Incident.id 그대로 사용.
+  highlightTargetId: string | null;
+  setHighlightTargetId: (id: string | null) => void;
 }
 
 const ReviewsContext = createContext<ReviewsContextType | undefined>(undefined);
@@ -52,116 +84,43 @@ function getKSTDate() {
   return new Date(utc + (3600000 * 9));
 }
 
-// Helper: Normalize any date format to "YYYY.MM.DD"
-function normalizeDate(d: any): string {
-  if (!d) return "";
-  
-  // If it's a Firestore Timestamp or Date object
-  if (typeof d === "object" && d !== null) {
-    if (typeof d.toDate === "function") {
-      const dateObj = d.toDate();
-      const utc = dateObj.getTime() + (dateObj.getTimezoneOffset() * 60000);
-      const kstDate = new Date(utc + (3600000 * 9));
-      return formatKSTDate(kstDate);
-    }
-    if (d.seconds) {
-      const dateObj = new Date(d.seconds * 1000);
-      const utc = dateObj.getTime() + (dateObj.getTimezoneOffset() * 60000);
-      const kstDate = new Date(utc + (3600000 * 9));
-      return formatKSTDate(kstDate);
-    }
-    if (d instanceof Date) {
-      const utc = d.getTime() + (d.getTimezoneOffset() * 60000);
-      const kstDate = new Date(utc + (3600000 * 9));
-      return formatKSTDate(kstDate);
-    }
-  }
+// CSV로 업로드하는 OrderItem/ProblemForm/Incident는 Firestore/서버 DB 없이 브라우저
+// localStorage에만 저장한다 — 실 API 연동 시점에 담당 개발자가 설계할 서버 DB와 별개로,
+// 이 대시보드가 자체 DB를 구축하지 않기로 한 방침에 따른 임시 저장소다. 새로고침/재접속해도
+// 업로드한 CSV가 사라지지 않는 정도만 보장하며, 여러 기기/사용자 간 공유는 안 된다.
+const REVIEWS_STORAGE_KEY = "honestflower_reviews";
+const ORDER_ITEMS_STORAGE_KEY = "honestflower_orderItems";
+const PROBLEM_FORMS_STORAGE_KEY = "honestflower_problemForms";
+const INCIDENTS_STORAGE_KEY = "honestflower_incidents";
+const CHAT_ROOMS_STORAGE_KEY = "honestflower_chatRooms";
+const CS_COST_EXPORT_STORAGE_KEY = "honestflower_csCostExportRows";
+const COMPANY_HOLIDAYS_STORAGE_KEY = "honestflower_companyHolidays";
+const MONTHLY_CS_LABOR_COST_ALLOCATION_STORAGE_KEY = "honestflower_monthlyCsLaborCostAllocation";
+const DISPATCH_FAILURE_WEEKLY_STORAGE_KEY = "honestflower_dispatchFailureWeekly";
+const DISPATCH_FAILURE_MONTHLY_STORAGE_KEY = "honestflower_dispatchFailureMonthly";
 
-  // If it's a string or other primitive
-  let s = String(d).trim();
-  
-  // Support Korean format: e.g. "2026년 06월 27일" -> "2026.06.27"
-  s = s.replace(/년/g, ".").replace(/월/g, ".").replace(/일/g, "");
-  
-  if (s.includes("T")) {
-    s = s.split("T")[0];
-  } else if (s.includes(" ")) {
-    s = s.split(" ")[0];
+function loadFromLocalStorage<T>(key: string, fallback: T): T {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? (JSON.parse(raw) as T) : fallback;
+  } catch (err) {
+    console.error(`localStorage load error (${key}):`, err);
+    return fallback;
   }
-  
-  // Replace dashes and slashes with dots
-  s = s.replace(/-/g, ".").replace(/\//g, ".");
-  
-  // Strip non-numeric and non-dot characters
-  s = s.replace(/[^0-9.]/g, "");
-  
-  // Ensure padded double digit format
-  const parts = s.split(".").filter(Boolean);
-  if (parts.length === 3) {
-    const y = parts[0];
-    const m = parts[1].padStart(2, "0");
-    const dPart = parts[2].padStart(2, "0");
-    return `${y}.${m}.${dPart}`;
-  } else if (parts.length === 2) {
-    // Missing year (e.g. "06.27" or "6.27") -> assume current year from local KST date
-    const currentYear = getKSTDate().getFullYear();
-    const m = parts[0].padStart(2, "0");
-    const dPart = parts[1].padStart(2, "0");
-    return `${currentYear}.${m}.${dPart}`;
+}
+
+function saveToLocalStorage(key: string, value: unknown): void {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch (err) {
+    console.error(`localStorage save error (${key}):`, err);
   }
-  
-  return s;
 }
 
 const MASKED_NAMES = [
   "김*정", "이*민", "박*현", "최*원", "정*우", "강*서", "조*아", "윤*준", "장*민", "한*영",
   "오*지", "서*훈", "신*연", "권*재", "황*우", "송*은", "안*진", "임*혁", "전*하", "홍*윤"
 ];
-
-// Helper: Remove undefined properties from an object before writing to Firestore
-export function sanitizeForFirestore<T extends Record<string, any>>(obj: T): Record<string, any> {
-  const clean: Record<string, any> = {};
-  Object.keys(obj).forEach(key => {
-    const val = obj[key];
-    if (val !== undefined) {
-      if (Array.isArray(val)) {
-        clean[key] = val.filter(v => v !== undefined);
-      } else if (val !== null && typeof val === "object" && !(val instanceof Date)) {
-        clean[key] = sanitizeForFirestore(val);
-      } else {
-        clean[key] = val;
-      }
-    }
-  });
-  return clean;
-}
-
-enum OperationType {
-  CREATE = 'create',
-  UPDATE = 'update',
-  DELETE = 'delete',
-  LIST = 'list',
-  GET = 'get',
-  WRITE = 'write',
-}
-
-interface FirestoreErrorInfo {
-  error: string;
-  operationType: OperationType;
-  path: string | null;
-  authInfo: Record<string, any>;
-}
-
-function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
-  const errInfo: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : String(error),
-    authInfo: {},
-    operationType,
-    path
-  };
-  console.error('Firestore Error: ', JSON.stringify(errInfo));
-  throw new Error(JSON.stringify(errInfo));
-}
 
 // Helper: Ensure a name is masked to 'X*Y' format or assign a consistent masked name
 export function getMaskedName(id: number, rawName?: string): string {
@@ -182,6 +141,11 @@ export function areReviewsSamePost(a: any, b: any): boolean {
   
   const aText = (a.review || "").trim();
   const bText = (b.review || "").trim();
+
+  // Customer ID is the most reliable identifier when present (avoids reviewer-name/phone-number mixups)
+  if (a.rawCustomerId && b.rawCustomerId && a.rawCustomerId === b.rawCustomerId && a.date === b.date && a.product === b.product) {
+    return true;
+  }
 
   // If both have explicit rawReviewer strings AND same date AND same non-empty review text:
   if (a.rawReviewer && b.rawReviewer && a.rawReviewer === b.rawReviewer && a.date === b.date && aText.length >= 3 && aText === bText) {
@@ -267,14 +231,19 @@ export function getDeduplicatedReviews(list: Review[]): Review[] {
 
       const mReviewer = m.rawReviewer || m.reviewer || `고객#${m.id}`;
       const mText = (m.review || "").trim();
-      
+
+      // Customer ID is the most reliable identifier when present (avoids reviewer-name/phone-number mixups)
+      const sameCustomerId = Boolean(item.rawCustomerId && m.rawCustomerId && item.rawCustomerId === m.rawCustomerId && m.date === item.date && m.product === item.product);
       const sameReviewer = item.rawReviewer && m.rawReviewer && mReviewer === itemReviewer && m.date === item.date && m.product === item.product && mText === itemText;
       const sameContentIntegrity = itemText.length >= 8 && mText === itemText && m.date === item.date && m.product === item.product;
 
-      return Boolean(sameReviewer || sameContentIntegrity);
+      return Boolean(sameCustomerId || sameReviewer || sameContentIntegrity);
     });
-    
+
     if (existing) {
+      if (!existing.rawCustomerId && item.rawCustomerId) {
+        existing.rawCustomerId = item.rawCustomerId;
+      }
       if (!existing.rawReviewer && item.rawReviewer) {
         existing.rawReviewer = item.rawReviewer;
         existing.reviewer = item.reviewer;
@@ -372,208 +341,6 @@ function deriveReviewType(rating: number, existingType?: string): "추천" | "�
   return "비추천";
 }
 
-// Resilient parsing of Firestore document to Review object
-function parseFirestoreReview(docId: string, data: any, fallbackId: number): Review {
-  // 1. Parse or derive numeric ID
-  let idVal = data.id !== undefined ? data.id : data.ID;
-  if (idVal === undefined) idVal = data.No !== undefined ? data.No : data.no;
-  if (idVal === undefined) idVal = data.번호 !== undefined ? data.번호 : data.index;
-  
-  let id = Number(idVal);
-  if (isNaN(id) || id === 0) {
-    const numericDocId = Number(docId.replace(/\D/g, ""));
-    id = !isNaN(numericDocId) && numericDocId > 0 ? numericDocId : fallbackId;
-  }
-
-  // 2. Resolve & Normalize Date
-  const rawDate = data.date || data.Date || data.DATE || data.작성일 || data.등록일 || data.날짜 || "";
-  let date = normalizeDate(rawDate);
-  if (!date) {
-    date = formatKSTDate(getKSTDate());
-  }
-
-  // 3. Resolve Product
-  const product = String(data.product || data.Product || data.PRODUCT || data.상품명 || data.상품 || "알 수 없는 상품").trim();
-
-  // 4. Resolve Rating
-  const ratingVal = data.rating !== undefined ? data.rating : (data.Rating !== undefined ? data.Rating : (data.평점 !== undefined ? data.평점 : (data.별점 !== undefined ? data.별점 : 5)));
-  const rating = Number(ratingVal) || 5;
-
-  // 5. Resolve Review Text
-  const reviewText = String(data.review || data.Review || data.REVIEW || data.후기 || data.내용 || data.본문 || "").trim();
-
-  // 6. Resolve Type
-  const rawType = data.type || data.Type || data.TYPE || data.추천여부 || data.분류 || "";
-  const type = deriveReviewType(rating, rawType);
-
-  // 7. Resolve Category
-  const category = String(data.category || data.Category || data.CATEGORY || data.카테고리 || data.속성 || "품질/상태").trim();
-
-  // 8. Resolve Department
-  const department = String(data.department || data.Department || data.DEPARTMENT || data.부서 || data.담당부서 || "SCM & MD").trim();
-
-  // 8.5 Resolve Reviewer
-  const rawReviewer = data.reviewer || data.Reviewer || data.REVIEWER || data.작성자 || data.이름 || data.user || data.User || data.USER || "";
-  const reviewer = getMaskedName(id, rawReviewer);
-
-  const archived = data.archived === true || data.Archived === true;
-
-  // 9. Manual Overrides requested by the user to classify specific IDs as dissatisfied (비추천)
-  if (id === 109) {
-    return {
-      id,
-      date: "2026.07.01",
-      product: "프릴 리시안셔스",
-      rating: 3,
-      type: "비추천",
-      category: "품질/상태",
-      department: "SCM & MD",
-      review: "꽃 들이 많이 떨어져 있어서 아쉬웠어요ㅠㅠ",
-      archived: false,
-      reviewer: getMaskedName(id, "김*정"),
-      rawReviewer: "김*정"
-    };
-  }
-  if (id === 107) {
-    return {
-      id,
-      date: "2026.07.01",
-      product: "플라워 럭키박스",
-      rating: 3,
-      type: "비추천",
-      category: "품질/상태",
-      department: "SCM & MD",
-      review: "오픈하는데 잎이 우수우 떨어지네요 그건 뭐 어쩔수 없다하더라도... 홈페이지 홍보 사진과 풍성함이 다른것 같아요 한번더 받아보고 또 실망감이 든다면 재주문은 안할것 같아요",
-      archived: false,
-      reviewer: getMaskedName(id, "김*정"),
-      rawReviewer: "김*정"
-    };
-  }
-  if (id === 131) {
-    return {
-      id,
-      date: "2026.06.30",
-      product: "7월 플로리스트픽 내추럴",
-      rating: 3,
-      type: "비추천",
-      category: "품질/상태",
-      department: "SCM & MD",
-      review: "3번째배송인데 지난번은 누락배송 이번엔 마지막사진처럼 꽃들을 고정하는장치로 고정하지않아 카네이션 머리가 부러져왔어요. 몇송이 안되는 꽃중 한놈이 망가져배송. ㅠ히야신스는 저렇게 짧뚱하게 보내와서 맨마지막 놈은 화병에 갇혀버리고...얼마전 해바라기도 시들어오더니 속상하네요. 아니 화가나요. 꽃구성 첫번째사진처람 이뻐요. 그나마 대가리 부러진걸 대표사진으로안한건 예의사밉니다",
-      archived: false,
-      reviewer: getMaskedName(id, "고객"),
-      rawReviewer: "고객"
-    };
-  }
-  if (id === 195) {
-    return {
-      id,
-      date: "2026.06.28",
-      product: "테디베어 해바라기",
-      rating: 3,
-      type: "비추천",
-      category: "배송/포장",
-      department: "SCM & CS",
-      review: "저번에 동글동글 예쁜 아이들로 와서 또 주문했는데 이번엔….🫠 그리고 배송도 너무 아쉬웠어요ㅠㅠ 꽃 중 하나는 아예 안 꽂혀 있었어요",
-      archived: false,
-      reviewer: getMaskedName(id, "고객"),
-      rawReviewer: "고객"
-    };
-  }
-  if (id === 1037) {
-    return {
-      id,
-      date: "2026.07.11",
-      product: "튜베로즈",
-      rating: 5,
-      type: "비추천",
-      category: "품질/상태",
-      department: "SCM & MD",
-      review: "이렇게 누렇게 뜬걸 보내주시나요",
-      archived: false,
-      reviewer: getMaskedName(id, "윤*현"),
-      rawReviewer: "윤*현",
-      image_url: "https://file.honestflower.kr/media/images/reviewimage/1783761170/75847_large.webp"
-    };
-  }
-
-  if (id === 1039) {
-    return {
-      id,
-      date: "2026.07.11",
-      product: "7월 플로리스트픽 가니쉬 부쉬",
-      rating: 3,
-      type: "비추천",
-      category: "상품구성/양",
-      department: "MD",
-      review: "신지매를 한번도 구매해본적이 없어서 모르다가 오늘 뒤늦게 알았는데 제가 받은건 신지매가 아니라 썸머라일락이네요;;(어쩐지 향이 좋더라) 수급상황에 따라 꽃구성을 바꾸는건 괜찮지만 무슨 꽃으로 바꿨는지 좀 알려주면 좋겠어요 썸머라일락도 처음봐서 몰랐거든요. 도라지는 상태가 좋은편인데, 가니시부쉬가 예상보다 빨리 시들고 있습니다 ㅜ",
-      archived: false,
-      reviewer: getMaskedName(id, "남*예"),
-      rawReviewer: "남*예",
-      image_url: "https://file.honestflower.kr/media/images/reviewimage/1783759233/75845_large.webp"
-    };
-  }
-
-  if (id === 1054) {
-    return {
-      id,
-      date: "2026.07.11",
-      product: "튜베로즈",
-      rating: 5,
-      type: "중립",
-      category: "품질/상태",
-      department: "SCM & MD",
-      review: "날이 더운지 꽃이 힘이 없어요. 얼른 다듬어서 꽃병에 꽂았어요.  향은 좋은데 잘 살아나겠죠",
-      archived: false,
-      reviewer: getMaskedName(id, "서*정"),
-      rawReviewer: "서*정",
-      image_url: "https://file.honestflower.kr/media/images/reviewimage/1783756799/75831_large.webp"
-    };
-  }
-
-  if (id === 1111) {
-    return {
-      id,
-      date: "2026.07.12",
-      product: "테이블 야자",
-      rating: 5,
-      type: "비추천",
-      category: "품질/상태",
-      department: "SCM & MD",
-      review: "너무시들어서 돈이 아깝네요\n다른꽃도 노랗게 뜬걸보내주고\n자주 이용하지만\n이번은 너무 심합니다",
-      archived: false,
-      reviewer: getMaskedName(id, "윤*현"),
-      rawReviewer: "윤*현",
-      image_url: "https://file.honestflower.kr/media/images/reviewimage/1783835134/75889_large.webp"
-    };
-  }
-
-  const image_url = data.image_url || data.imageUrl || data.imageURL || "";
-
-  const parsedReview: Review = {
-    id,
-    date,
-    product,
-    rating,
-    type,
-    category,
-    department,
-    review: reviewText,
-    archived,
-    reviewer,
-    rawReviewer,
-    image_url
-  };
-
-  if (data.incidentStatus !== undefined) parsedReview.incidentStatus = data.incidentStatus;
-  if (data.accidentType !== undefined) parsedReview.accidentType = data.accidentType;
-  if (data.accidentDetail !== undefined) parsedReview.accidentDetail = data.accidentDetail;
-  if (data.refundAmount !== undefined) parsedReview.refundAmount = Number(data.refundAmount);
-
-  console.log(`[DEBUG] Parsed review ID ${id}:`, parsedReview);
-
-  return parsedReview;
-}
-
 // Helper: Map static reviews to have rawReviewer and masked reviewer name
 const mapStaticReviews = (list: Review[]): Review[] => {
   return list.map(r => {
@@ -581,14 +348,29 @@ const mapStaticReviews = (list: Review[]): Review[] => {
     return {
       ...r,
       rawReviewer: raw,
-      reviewer: r.reviewer || getMaskedName(r.id, raw)
+      reviewer: r.reviewer || getMaskedName(r.id, raw),
+      // 노출여부 정보가 없는 옛 시드 데이터는 "노출 중"(처리 필요)으로 간주 — 신규 리뷰 기본값과 동일.
+      exposed: r.exposed !== undefined ? r.exposed : true
     };
   });
 };
 
 export function ReviewsProvider({ children }: { children: React.ReactNode }) {
-  const [rawReviews, setRawReviews] = useState<Review[]>(() => mapStaticReviews(staticReviews));
-  const [rawIncidents, setRawIncidents] = useState<Incident[]>(() => initialIncidentsData);
+  // 아래 6개 컬렉션(대용량 CSV 업로드 데이터)은 IndexedDB에서 비동기로 불러온다(localStorage는
+  // 브라우저당 5~10MB 한도라 1년치 주문 데이터 등을 못 담아 도입 — idbStorage.ts 참고). 그래서
+  // useState 초기값은 항상 시드 데이터이고, 실제 저장된 값은 아래 마운트 effect에서 채워진다.
+  const [rawReviews, setRawReviews] = useState<Review[]>(mapStaticReviews(staticReviews));
+  const [rawIncidents, setRawIncidents] = useState<Incident[]>(initialIncidentsData);
+  const [orderItems, setOrderItems] = useState<OrderItem[]>(initialOrderItemsData);
+  const [problemForms, setProblemForms] = useState<ProblemForm[]>(initialProblemFormsData);
+  const [chatRooms, setChatRooms] = useState<ChatRoom[]>(initialChatRoomsData);
+  const [csCostExportRows, setCsCostExportRows] = useState<CsCostExportRow[]>([]);
+  // 용량이 작아 그대로 localStorage 유지(휴무일 목록/인건비 배분값은 몇십 바이트 수준).
+  const [hasLoadedPersistedData, setHasLoadedPersistedData] = useState(false);
+  const [companyHolidays, setCompanyHolidays] = useState<string[]>(() => loadFromLocalStorage(COMPANY_HOLIDAYS_STORAGE_KEY, defaultCompanyHolidays));
+  const [monthlyCsLaborCostAllocation, setMonthlyCsLaborCostAllocation] = useState<number>(() => loadFromLocalStorage(MONTHLY_CS_LABOR_COST_ALLOCATION_STORAGE_KEY, DEFAULT_MONTHLY_CS_LABOR_COST_ALLOCATION_KRW));
+  const [dispatchFailureWeekly, setDispatchFailureWeekly] = useState<DispatchFailureRow[]>(() => loadFromLocalStorage(DISPATCH_FAILURE_WEEKLY_STORAGE_KEY, []));
+  const [dispatchFailureMonthly, setDispatchFailureMonthly] = useState<DispatchFailureRow[]>(() => loadFromLocalStorage(DISPATCH_FAILURE_MONTHLY_STORAGE_KEY, []));
   
   // Dynamically compute deduplicated and image-merged reviews list for all metrics and components
   const reviews = useMemo(() => getDeduplicatedReviews(rawReviews), [rawReviews]);
@@ -597,30 +379,19 @@ export function ReviewsProvider({ children }: { children: React.ReactNode }) {
   const incidents = useMemo(() => getDeduplicatedIncidents(rawIncidents), [rawIncidents]);
 
   const [isLoading, setIsLoading] = useState<boolean>(true);
-  const [isFirestoreEmpty, setIsFirestoreEmpty] = useState<boolean>(false);
-  const [isUsingLocalData, setIsUsingLocalData] = useState<boolean>(true);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [weekFilter, setWeekFilter] = useState<"this" | "last" | "all">("all");
-  const [activeTab, setActiveTab] = useState<"metrics" | "products" | "incidents" | "voc" | "archive">("metrics");
+  const [activeTab, setActiveTab] = useState<"metrics" | "products" | "incidents" | "voc" | "archive" | "claimcost" | "actionboard" | "csresponse">("metrics");
   const [metricsProductFilter, setMetricsProductFilter] = useState<string>("");
   const [metricsTypeFilter, setMetricsTypeFilter] = useState<"all" | "추천" | "중립" | "비추천" | "사고접수">("all");
+  const [highlightTargetId, setHighlightTargetId] = useState<string | null>(null);
 
   const weekRanges = useMemo(() => {
-    const activeReviews = reviews.filter(r => !r.archived);
-    const allDates: string[] = [
-      ...activeReviews.map(r => r.date).filter(Boolean),
-      ...incidents.map(i => i.date).filter(Boolean)
-    ];
-    let anchor = getKSTDate();
-    
-    if (allDates.length > 0) {
-      allDates.sort();
-      const maxDateStr = allDates[allDates.length - 1];
-      const [y, m, d] = maxDateStr.split(".").map(Number);
-      if (!isNaN(y) && !isNaN(m) && !isNaN(d)) {
-        anchor = new Date(y, m - 1, d);
-      }
-    }
+    // 실제 오늘(KST) 기준으로 고정. 예전엔 로드된 리뷰/사고접수 데이터 중 가장 최근 날짜를
+    // anchor로 덮어써서(더미데이터가 "항상 최신"처럼 보이게 하던 목업 시절 편법), 정적 시드
+    // 데이터의 최신 날짜(예: 2026.08.14)가 실제 오늘 날짜(예: 2026.08.20)보다 과거면 "이번주"가
+    // 실제와 어긋나 보이는 문제가 있었다. 실데이터 연동 단계에서는 항상 실제 날짜를 써야 한다.
+    const anchor = getKSTDate();
 
     const day = anchor.getDay(); // 0 is Sun, 1 is Mon, ..., 5 is Fri, 6 is Sat
     
@@ -651,29 +422,101 @@ export function ReviewsProvider({ children }: { children: React.ReactNode }) {
         start: formatKSTDate(lastWeekSat),
         end: formatKSTDate(lastWeekFri),
         label: `저번주 (${formatKSTDate(lastWeekSat).slice(5)} ~ ${formatKSTDate(lastWeekFri).slice(5)})`
+      },
+      // "전체기간"은 업로드된 전체 데이터가 아니라 이번주+저번주 2주 합산으로 정의된다.
+      allPeriod: {
+        start: formatKSTDate(lastWeekSat),
+        end: formatKSTDate(thisWeekFri),
+        label: `전체 기간 (${formatKSTDate(lastWeekSat).slice(5)} ~ ${formatKSTDate(thisWeekFri).slice(5)})`
       }
     };
   }, [reviews, incidents]);
 
-  const isUsingLocalDataRef = React.useRef(true);
+  useEffect(() => {
+    // 최초 마운트 시 6개 대용량 컬렉션을 IndexedDB에서 병렬로 불러온다(idbLoad는 같은 키의
+    // localStorage 값이 남아있으면 1회 자동 이전까지 해준다 — idbStorage.ts 참고). 로드가 끝나기
+    // 전까지는 hasLoadedPersistedData가 false라 아래 저장용 effect들이 동작하지 않으므로, 방금 막
+    // 채워 넣은 시드값으로 실제 저장된 값을 덮어쓸 일이 없다.
+    let cancelled = false;
+    (async () => {
+      const [loadedReviews, loadedIncidents, loadedOrderItems, loadedProblemForms, loadedChatRooms, loadedCsCostExportRows] = await Promise.all([
+        idbLoad(REVIEWS_STORAGE_KEY, mapStaticReviews(staticReviews)),
+        idbLoad(INCIDENTS_STORAGE_KEY, initialIncidentsData),
+        idbLoad(ORDER_ITEMS_STORAGE_KEY, initialOrderItemsData),
+        idbLoad(PROBLEM_FORMS_STORAGE_KEY, initialProblemFormsData),
+        idbLoad(CHAT_ROOMS_STORAGE_KEY, initialChatRoomsData),
+        idbLoad<CsCostExportRow[]>(CS_COST_EXPORT_STORAGE_KEY, []),
+      ]);
+      if (cancelled) return;
+      setRawReviews(loadedReviews);
+      setRawIncidents(loadedIncidents);
+      setOrderItems(loadedOrderItems);
+      setProblemForms(loadedProblemForms);
+      setChatRooms(loadedChatRooms);
+      setCsCostExportRows(loadedCsCostExportRows);
+      setHasLoadedPersistedData(true);
+      setIsLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  // CSV로 업로드한 리뷰/OrderItem/ProblemForm/ChatRoom/Incident를 IndexedDB에 지속 저장 — 새로고침해도
+  // 유지되도록 한다(Firestore/서버 DB 연동 아님, [[no-dashboard-db]] 방침 그대로). hasLoadedPersistedData가
+  // true가 되기 전(초기 로드 완료 전)에는 저장을 건너뛴다 — 그렇지 않으면 마운트 직후 시드값으로
+  // 저장된 실데이터를 덮어쓰는 경쟁 상태가 생긴다.
+  useEffect(() => {
+    if (!hasLoadedPersistedData) return;
+    idbSave(REVIEWS_STORAGE_KEY, rawReviews);
+  }, [rawReviews, hasLoadedPersistedData]);
 
   useEffect(() => {
-    // Default to clean local static reviews (200 reviews)
-    setRawReviews(mapStaticReviews(staticReviews));
-    setIsLoading(false);
-  }, []);
+    if (!hasLoadedPersistedData) return;
+    idbSave(ORDER_ITEMS_STORAGE_KEY, orderItems);
+  }, [orderItems, hasLoadedPersistedData]);
+
+  useEffect(() => {
+    if (!hasLoadedPersistedData) return;
+    idbSave(PROBLEM_FORMS_STORAGE_KEY, problemForms);
+  }, [problemForms, hasLoadedPersistedData]);
+
+  useEffect(() => {
+    if (!hasLoadedPersistedData) return;
+    idbSave(CHAT_ROOMS_STORAGE_KEY, chatRooms);
+  }, [chatRooms, hasLoadedPersistedData]);
+
+  useEffect(() => {
+    if (!hasLoadedPersistedData) return;
+    idbSave(CS_COST_EXPORT_STORAGE_KEY, csCostExportRows);
+  }, [csCostExportRows, hasLoadedPersistedData]);
+
+  useEffect(() => {
+    saveToLocalStorage(COMPANY_HOLIDAYS_STORAGE_KEY, companyHolidays);
+  }, [companyHolidays]);
+
+  useEffect(() => {
+    saveToLocalStorage(MONTHLY_CS_LABOR_COST_ALLOCATION_STORAGE_KEY, monthlyCsLaborCostAllocation);
+  }, [monthlyCsLaborCostAllocation]);
+
+  useEffect(() => {
+    saveToLocalStorage(DISPATCH_FAILURE_WEEKLY_STORAGE_KEY, dispatchFailureWeekly);
+  }, [dispatchFailureWeekly]);
+
+  useEffect(() => {
+    saveToLocalStorage(DISPATCH_FAILURE_MONTHLY_STORAGE_KEY, dispatchFailureMonthly);
+  }, [dispatchFailureMonthly]);
+
+  useEffect(() => {
+    if (!hasLoadedPersistedData) return;
+    idbSave(INCIDENTS_STORAGE_KEY, rawIncidents);
+  }, [rawIncidents, hasLoadedPersistedData]);
 
   // Compute active weekly reviews dynamically from the main list with date boundaries!
   // "전체기간" (weekFilter === "all") is defined specifically as the combination of This Week and Last Week.
   const weeklyReviews = useMemo(() => {
     const active = reviews.filter(r => r.archived !== true);
-    
-    if (weekFilter === "all") {
-      return active;
-    }
-    
-    const range = weekFilter === "this" ? weekRanges.thisWeek : weekRanges.lastWeek;
-    
+
+    const range = weekFilter === "this" ? weekRanges.thisWeek : weekFilter === "last" ? weekRanges.lastWeek : weekRanges.allPeriod;
+
     return active.filter(r => {
       // Comparison is lexical and works perfectly for "YYYY.MM.DD" formatted strings
       return r.date >= range.start && r.date <= range.end;
@@ -682,10 +525,7 @@ export function ReviewsProvider({ children }: { children: React.ReactNode }) {
 
   // Compute active weekly incidents dynamically with date boundaries
   const weeklyIncidents = useMemo(() => {
-    if (weekFilter === "all") {
-      return incidents;
-    }
-    const range = weekFilter === "this" ? weekRanges.thisWeek : weekRanges.lastWeek;
+    const range = weekFilter === "this" ? weekRanges.thisWeek : weekFilter === "last" ? weekRanges.lastWeek : weekRanges.allPeriod;
     return incidents.filter(i => i.date >= range.start && i.date <= range.end);
   }, [incidents, weekFilter, weekRanges]);
 
@@ -746,145 +586,41 @@ export function ReviewsProvider({ children }: { children: React.ReactNode }) {
     return statsList.sort((a, b) => b.totalCount - a.totalCount);
   }, [weeklyReviews, weeklyIncidents]);
 
-  // Sync / seed initial reviews to Firestore
-  const syncWithFirestore = async () => {
-    setIsSyncing(true);
-    try {
-      const BATCH_SIZE = 400;
-      for (let i = 0; i < staticReviews.length; i += BATCH_SIZE) {
-        const chunk = staticReviews.slice(i, i + BATCH_SIZE);
-        const batch = writeBatch(db);
-        chunk.forEach((item) => {
-          const docRef = doc(db, "reviews", item.id.toString());
-          batch.set(docRef, sanitizeForFirestore(item));
-        });
-        await batch.commit();
-      }
-      setIsFirestoreEmpty(false);
-      setIsUsingLocalData(false);
-    } catch (err) {
-      console.error("Firestore sync error:", err);
-      alert("데이터 동기화 도중 오류가 발생했습니다: " + (err as Error).message);
-    } finally {
-      setIsSyncing(false);
-    }
-  };
-
-  // Archive all currently active reviews to reset the weekly dashboard
+  // 현재 주간 대시보드에 활성화(archived !== true)된 리뷰를 전부 archived로 표시해 주간 집계를 비운다.
+  // 로컬 상태(IndexedDB에 저장됨)만 변경 — Firestore/서버 DB 연동 아님([[no-dashboard-db]] 방침).
   const archiveActiveReviews = async () => {
-    setIsSyncing(true);
-    try {
-      const activeDocs = rawReviews.filter(r => r.archived !== true);
-      if (activeDocs.length === 0) {
-        alert("현재 주간 대시보드에 활성화된 데이터가 없습니다.");
-        return;
-      }
-      
-      const BATCH_SIZE = 400;
-      for (let i = 0; i < activeDocs.length; i += BATCH_SIZE) {
-        const chunk = activeDocs.slice(i, i + BATCH_SIZE);
-        const batch = writeBatch(db);
-        chunk.forEach((item) => {
-          const docRef = doc(db, "reviews", item.id.toString());
-          batch.update(docRef, { archived: true });
-        });
-        await batch.commit();
-      }
-    } catch (err) {
-      console.error("주간 데이터 초기화 오류:", err);
-      alert("주간 데이터 초기화 도중 오류가 발생했습니다: " + (err as Error).message);
-    } finally {
-      setIsSyncing(false);
+    const activeCount = rawReviews.filter(r => r.archived !== true).length;
+    if (activeCount === 0) {
+      alert("현재 주간 대시보드에 활성화된 데이터가 없습니다.");
+      return;
     }
+    setRawReviews(prev => prev.map(r => (r.archived !== true ? { ...r, archived: true } : r)));
   };
 
-  // Add a new review to Firestore
+  // 새 리뷰를 로컬 상태에 추가 — IndexedDB에 저장됨(Firestore 연동 아님).
   const addReview = async (newReview: Omit<Review, "id">) => {
-    try {
-      // Find maximum id to auto-increment
-      const maxId = rawReviews.length > 0 ? Math.max(...rawReviews.map(r => r.id)) : 0;
-      const nextId = maxId + 1;
-
-      const reviewDoc: Review = {
-        ...newReview,
-        id: nextId,
-        archived: false // newly added live reviews are active by default
-      };
-
-      const docRef = doc(db, "reviews", nextId.toString());
-      const batch = writeBatch(db);
-      
-      batch.set(docRef, sanitizeForFirestore(reviewDoc));
-      await batch.commit();
-    } catch (err) {
-      console.error("Firestore review add error:", err);
-      throw err;
-    }
+    const maxId = rawReviews.length > 0 ? Math.max(...rawReviews.map(r => r.id)) : 0;
+    const nextId = maxId + 1;
+    const reviewDoc: Review = {
+      ...newReview,
+      id: nextId,
+      archived: false, // newly added live reviews are active by default
+      exposed: newReview.exposed !== undefined ? newReview.exposed : true // 신규 리뷰는 기본 노출 상태
+    };
+    setRawReviews(prev => [...prev, reviewDoc]);
   };
 
-  // Manual refresh function to force pull from Firestore
-  const refreshData = async () => {
-    setIsSyncing(true);
-    setIsLoading(true);
-    try {
-      const reviewsCollection = collection(db, "reviews");
-      const reviewsQuery = query(reviewsCollection, limit(1000));
-      const snapshot = await getDocs(reviewsQuery);
-      
-      if (snapshot.empty) {
-        setIsFirestoreEmpty(true);
-        setIsUsingLocalData(true);
-        setRawReviews(mapStaticReviews(staticReviews));
-      } else {
-        const list: Review[] = [];
-        let indexCounter = 10000;
-        snapshot.forEach((doc) => {
-          const data = doc.data();
-          // Skip non-review testing or metadata documents to maintain data integrity
-          if (doc.id === "test_connection" || (!data.review && !data.product && !data.rating)) {
-            console.log("Skipping non-review document:", doc.id, data);
-            return;
-          }
-          list.push(parseFirestoreReview(doc.id, data, indexCounter++));
-        });
-        // Sort descending: by date first, then by id
-        list.sort((a, b) => {
-          if (b.date !== a.date) {
-            return b.date.localeCompare(a.date);
-          }
-          return b.id - a.id;
-        });
-        setRawReviews(list);
-        setIsFirestoreEmpty(false);
-        setIsUsingLocalData(false);
-      }
-    } catch (err) {
-      console.error("Manual Firestore refresh error:", err);
-      alert("파이어베이스에서 데이터를 새로고침하는 중 오류가 발생했습니다: " + (err as Error).message);
-    } finally {
-      setIsSyncing(false);
-      setIsLoading(false);
-    }
-  };
-
-  // Reset dataset back to initial static dataset (deleting any uploaded/imported Firestore documents)
+  // 전체 데이터를 초기 시드값으로 되돌린다 — 로컬 상태만 초기화(Firestore 연동 아님).
   const resetToInitialData = async () => {
     setIsSyncing(true);
     try {
-      while (true) {
-        const snapshot = await getDocs(query(collection(db, "reviews"), limit(400)));
-        if (snapshot.empty) break;
-        const batch = writeBatch(db);
-        snapshot.docs.forEach(d => batch.delete(d.ref));
-        await batch.commit();
-      }
-    } catch (err) {
-      console.error("Reset error:", err);
-    } finally {
       setRawReviews(mapStaticReviews(staticReviews));
       setRawIncidents(initialIncidentsData);
-      setIsFirestoreEmpty(true);
-      setIsUsingLocalData(true);
+      setOrderItems(initialOrderItemsData);
+      setProblemForms(initialProblemFormsData);
+      setChatRooms(initialChatRoomsData);
+      setCsCostExportRows([]);
+    } finally {
       setIsSyncing(false);
     }
   };
@@ -922,6 +658,7 @@ export function ReviewsProvider({ children }: { children: React.ReactNode }) {
             if (incoming.image_url && !ex.image_url) ex.image_url = incoming.image_url;
             if (incoming.csResponse && !ex.csResponse) ex.csResponse = incoming.csResponse;
             if (incoming.orderNumber && !ex.orderNumber) ex.orderNumber = incoming.orderNumber;
+            if (incoming.importChannel && !ex.importChannel) ex.importChannel = incoming.importChannel;
             if (incoming.incidentStatus) ex.incidentStatus = incoming.incidentStatus;
             if (incoming.claimText && incoming.claimText.length > (ex.claimText?.length || 0)) {
               ex.claimText = incoming.claimText;
@@ -948,7 +685,127 @@ export function ReviewsProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  // Bulk import parsed CSV reviews into state (and sync to Firestore if not using local data)
+  // Dedicated OrderItem Importer (Claim Cost cohort source) — local state only, no Firestore sync,
+  // same scope as importIncidents. Deduplicates by exact orderNumber (natural unique key).
+  const importOrderItems = async (newItems: OrderItem[], replace: boolean = true) => {
+    setIsSyncing(true);
+    try {
+      let combined: OrderItem[];
+      if (!replace) {
+        const mergedMap = new Map<string, OrderItem>();
+        orderItems.forEach(i => mergedMap.set(i.orderNumber || i.id, { ...i }));
+        newItems.forEach(incoming => {
+          const key = incoming.orderNumber || incoming.id;
+          const existing = mergedMap.get(key);
+          if (existing) {
+            if (incoming.refundAmount !== undefined) existing.refundAmount = incoming.refundAmount;
+            if (incoming.settlementPrice !== undefined) existing.settlementPrice = incoming.settlementPrice;
+            if (incoming.claimStatus) existing.claimStatus = incoming.claimStatus;
+          } else {
+            mergedMap.set(key, { ...incoming });
+          }
+        });
+        combined = Array.from(mergedMap.values());
+      } else {
+        combined = [...newItems];
+      }
+
+      combined.sort((a, b) => b.paymentDate.localeCompare(a.paymentDate));
+      setOrderItems(combined);
+    } catch (err) {
+      console.error("OrderItem import error:", err);
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  // Dedicated ProblemForm(사고접수) Importer — local state only, no Firestore sync, same scope as
+  // importOrderItems. Deduplicates by exact id (natural unique key). Only claim-cost-relevant fields
+  // are parsed (see parseCSVToProblemForms); the full archive UI is a separate future phase.
+  const importProblemForms = async (newItems: ProblemForm[], replace: boolean = true) => {
+    setIsSyncing(true);
+    try {
+      let combined: ProblemForm[];
+      if (!replace) {
+        const mergedMap = new Map<string, ProblemForm>();
+        problemForms.forEach(p => mergedMap.set(p.id, { ...p }));
+        newItems.forEach(incoming => {
+          mergedMap.set(incoming.id, { ...incoming });
+        });
+        combined = Array.from(mergedMap.values());
+      } else {
+        combined = [...newItems];
+      }
+
+      setProblemForms(combined);
+    } catch (err) {
+      console.error("ProblemForm import error:", err);
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  // Dedicated ChatRoom(상담 채팅/전화 SLA) Importer — local state only, no Firestore sync, same
+  // scope as importProblemForms. Deduplicates by exact key(natural unique key from the admin export).
+  const importChatRooms = async (newItems: ChatRoom[], replace: boolean = true) => {
+    setIsSyncing(true);
+    try {
+      let combined: ChatRoom[];
+      if (!replace) {
+        const mergedMap = new Map<string, ChatRoom>();
+        chatRooms.forEach(c => mergedMap.set(c.key, { ...c }));
+        newItems.forEach(incoming => {
+          mergedMap.set(incoming.key, { ...incoming });
+        });
+        combined = Array.from(mergedMap.values());
+      } else {
+        combined = [...newItems];
+      }
+
+      setChatRooms(combined);
+    } catch (err) {
+      console.error("ChatRoom import error:", err);
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  // "CS비용 검증(선택)" 위젯이 파싱한 CS 비용 export를 전역에 반영 — 병합 개념 없이 항상 전체 교체.
+  const importCsCostExportRows = (rows: CsCostExportRow[]) => {
+    setCsCostExportRows(rows);
+  };
+
+  // 발송불가율(SCM VOC) — period(주/월) 기준으로 병합. 같은 period가 다시 올라오면 새 값으로 교체(매주
+  // 재실행한 쿼리로 최신화하는 워크플로우 그대로 반영), replace 모드는 통째로 교체.
+  const importDispatchFailureWeekly = (newRows: DispatchFailureRow[], replace: boolean = true) => {
+    let combined: DispatchFailureRow[];
+    if (!replace) {
+      const map = new Map<string, DispatchFailureRow>();
+      dispatchFailureWeekly.forEach(r => map.set(r.period, { ...r }));
+      newRows.forEach(r => map.set(r.period, { ...r }));
+      combined = Array.from(map.values());
+    } else {
+      combined = [...newRows];
+    }
+    combined.sort((a, b) => a.period.localeCompare(b.period));
+    setDispatchFailureWeekly(combined);
+  };
+
+  const importDispatchFailureMonthly = (newRows: DispatchFailureRow[], replace: boolean = true) => {
+    let combined: DispatchFailureRow[];
+    if (!replace) {
+      const map = new Map<string, DispatchFailureRow>();
+      dispatchFailureMonthly.forEach(r => map.set(r.period, { ...r }));
+      newRows.forEach(r => map.set(r.period, { ...r }));
+      combined = Array.from(map.values());
+    } else {
+      combined = [...newRows];
+    }
+    combined.sort((a, b) => a.period.localeCompare(b.period));
+    setDispatchFailureMonthly(combined);
+  };
+
+  // Bulk import parsed CSV reviews into local state (IndexedDB에 저장됨, Firestore 연동 아님)
   const importParsedReviews = async (newReviews: Review[], append: boolean = true) => {
     setIsSyncing(true);
     try {
@@ -965,22 +822,25 @@ export function ReviewsProvider({ children }: { children: React.ReactNode }) {
         newReviews.forEach(incoming => {
           if (existingMap.has(incoming.id)) {
             const existing = existingMap.get(incoming.id)!;
-            // If the incoming is updating CS fields or has matching content, safely enrich without losing photo / classification
-            if (incoming.incidentStatus || incoming.accidentType || incoming.refundAmount !== undefined) {
-              if (incoming.incidentStatus) existing.incidentStatus = incoming.incidentStatus;
-              if (incoming.accidentType) existing.accidentType = incoming.accidentType;
-              if (incoming.accidentDetail) existing.accidentDetail = incoming.accidentDetail;
-              if (incoming.refundAmount !== undefined) existing.refundAmount = incoming.refundAmount;
-              if (incoming.image_url && !existing.image_url) existing.image_url = incoming.image_url;
-              if (incoming.incidentStatus === "처리완료") {
-                existing.type = "비추천";
-                existing.rating = 1;
+            if (incoming.product === existing.product && incoming.date === existing.date) {
+              // 업로드하는 CSV는 항상 최신 정답 데이터이므로 핵심 필드는 전부 새 값으로 덮어쓴다.
+              // CSV엔 없지만 다른 경로로 이미 붙어있던 보강 정보(사고접수 처리결과 등)는 새 값이 없을 때만 보존한다.
+              const merged: Review = {
+                ...existing,
+                ...incoming,
+                incidentStatus: incoming.incidentStatus ?? existing.incidentStatus,
+                accidentType: incoming.accidentType ?? existing.accidentType,
+                accidentDetail: incoming.accidentDetail ?? existing.accidentDetail,
+                refundAmount: incoming.refundAmount !== undefined ? incoming.refundAmount : existing.refundAmount,
+                image_urls: incoming.image_url
+                  ? Array.from(new Set([...(existing.image_urls || (existing.image_url ? [existing.image_url] : [])), incoming.image_url]))
+                  : (existing.image_urls || (existing.image_url ? [existing.image_url] : [])),
+              };
+              if (merged.incidentStatus === "처리완료") {
+                merged.type = "비추천";
+                merged.rating = 1;
               }
-            } else if (incoming.product === existing.product && incoming.date === existing.date) {
-              // Same product and date: merge fields safely
-              if (incoming.review && incoming.review.length > (existing.review?.length || 0)) {
-                existing.review = incoming.review;
-              }
+              existingMap.set(incoming.id, merged);
             } else {
               // Conflicting ID from a new CSV (e.g. new CSV starting with ID 1 but totally different review)
               // Assign a new safe ID so it doesn't overwrite existing review!
@@ -1010,34 +870,9 @@ export function ReviewsProvider({ children }: { children: React.ReactNode }) {
       });
 
       setRawReviews(combined);
-
-      // If Firestore is connected & synced, write batch
-      if (!isUsingLocalData) {
-        if (!append) {
-          // Clear existing Firestore docs first when replacing
-          while (true) {
-            const snapshot = await getDocs(query(collection(db, "reviews"), limit(400)));
-            if (snapshot.empty) break;
-            const batch = writeBatch(db);
-            snapshot.docs.forEach(d => batch.delete(d.ref));
-            await batch.commit();
-          }
-        }
-
-        const BATCH_SIZE = 400;
-        for (let i = 0; i < combined.length; i += BATCH_SIZE) {
-          const chunk = combined.slice(i, i + BATCH_SIZE);
-          const batch = writeBatch(db);
-          chunk.forEach(item => {
-            const docRef = doc(db, "reviews", item.id.toString());
-            batch.set(docRef, sanitizeForFirestore(item));
-          });
-          await batch.commit();
-        }
-      }
     } catch (err) {
       console.error("CSV Import error:", err);
-      handleFirestoreError(err, OperationType.WRITE, "reviews");
+      throw err;
     } finally {
       setIsSyncing(false);
     }
@@ -1049,18 +884,30 @@ export function ReviewsProvider({ children }: { children: React.ReactNode }) {
       weeklyReviews,
       incidents,
       weeklyIncidents,
+      orderItems,
+      importOrderItems,
+      problemForms,
+      importProblemForms,
+      chatRooms,
+      importChatRooms,
+      csCostExportRows,
+      importCsCostExportRows,
+      dispatchFailureWeekly,
+      importDispatchFailureWeekly,
+      dispatchFailureMonthly,
+      importDispatchFailureMonthly,
+      companyHolidays,
+      setCompanyHolidays,
+      monthlyCsLaborCostAllocation,
+      setMonthlyCsLaborCostAllocation,
       productStats,
       isLoading,
-      isFirestoreEmpty,
-      isUsingLocalData,
-      syncWithFirestore,
       addReview,
       archiveActiveReviews,
       isSyncing,
       weekFilter,
       setWeekFilter,
       weekRanges,
-      refreshData,
       resetToInitialData,
       activeTab,
       setActiveTab,
@@ -1069,7 +916,9 @@ export function ReviewsProvider({ children }: { children: React.ReactNode }) {
       metricsTypeFilter,
       setMetricsTypeFilter,
       importParsedReviews,
-      importIncidents
+      importIncidents,
+      highlightTargetId,
+      setHighlightTargetId
     }}>
       {children}
     </ReviewsContext.Provider>

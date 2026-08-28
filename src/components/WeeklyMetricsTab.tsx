@@ -8,9 +8,8 @@ export default function WeeklyMetricsTab() {
   const { 
     weeklyReviews: allWeeklyReviews, 
     weeklyIncidents,
-    archiveActiveReviews, 
-    isSyncing, 
-    isUsingLocalData,
+    archiveActiveReviews,
+    isSyncing,
     metricsProductFilter,
     setMetricsProductFilter,
     metricsTypeFilter: selectedCardFilter,
@@ -377,11 +376,7 @@ export default function WeeklyMetricsTab() {
         <div className="flex items-center gap-2 shrink-0">
           <button
             onClick={() => {
-              if (isUsingLocalData) {
-                alert("현재 로컬 백업 모드입니다. 우측의 '원본 후기 아카이브' 탭에서 Firestore 연동(시딩)을 완료한 후 초기화를 진행해 주세요.");
-                return;
-              }
-              if (window.confirm("정말로 현재 주간 대시보드를 초기화하시겠습니까?\n\n* 집계 중인 주간 VOC 데이터는 주간 탭에서 비워지며, '원본 후기 아카이브' 탭과 클라우드 DB에는 날짜별로 안전하게 보관됩니다.")) {
+              if (window.confirm("정말로 현재 주간 대시보드를 초기화하시겠습니까?\n\n* 집계 중인 주간 VOC 데이터는 주간 탭에서 비워지며, '원본 후기 아카이브' 탭에는 날짜별로 안전하게 보관됩니다.")) {
                 archiveActiveReviews();
               }
             }}

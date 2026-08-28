@@ -1,23 +1,24 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { Review } from "../data/classifiedReviews";
 import { Star, Filter, ArrowUpDown, RefreshCw, MessageSquare, ShieldCheck, HelpCircle, AlertOctagon, Calendar, ChevronDown, ChevronUp, Database, Plus, Check, Loader2, Download, Search, Upload, FileSpreadsheet, FileText, Sparkles, CheckCircle2, AlertCircle, ArrowRight, Eye, Trash2, BarChart2, PieChart, AlertTriangle } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { useReviews, getGroupKeysMap, findIntegrityIssues, getDeduplicatedReviews, areReviewsSamePost } from "../context/ReviewsContext";
 import { rawReviewsCSV } from "../data/rawReviews";
 import { parseCSVToReviews, parseCSVToIncidents, detectCSVType, CSVParseResult } from "../utils/csvParser";
+import SchemaMismatchError from "./SchemaMismatchError";
 
 export default function ReviewArchiveTab() {
   const { 
-    reviews: reviewsData, 
-    isLoading, 
-    isUsingLocalData, 
-    syncWithFirestore, 
-    addReview, 
+    reviews: reviewsData,
+    isLoading,
+    addReview,
     isSyncing,
     importParsedReviews,
     importIncidents,
     resetToInitialData,
-    setActiveTab
+    setActiveTab,
+    highlightTargetId,
+    setHighlightTargetId
   } = useReviews();
 
   // Precompute group keys mapping for all reviews using high-precision similarity logic
@@ -384,6 +385,27 @@ export default function ReviewArchiveTab() {
     return list;
   }, [reviewsData, selectedType, selectedCategory, searchTarget, searchQuery, sortBy, selectedYear, selectedMonth, selectedDay, dateFilterType, calendarStart, calendarEnd]);
 
+  // 알림센터에서 특정 리뷰로 이동해왔을 때: 기본 필터(전체/전체/빈 검색어)로 마운트된 상태를
+  // 가정하고, 목록에서 대상 리뷰를 찾아 펼치고 보이는 범위(visibleCount)를 넓혀 스크롤 위치를 맞춘다.
+  useEffect(() => {
+    if (!highlightTargetId) return;
+    const targetIdNum = Number(highlightTargetId);
+    if (Number.isNaN(targetIdNum)) return;
+    const idx = filteredAndSortedReviews.findIndex(r => r.id === targetIdNum);
+    if (idx === -1) return;
+    setVisibleCount(v => (idx + 1 > v ? idx + 1 : v));
+    setExpandedReviewId(targetIdNum);
+  }, [highlightTargetId, filteredAndSortedReviews]);
+
+  useEffect(() => {
+    if (!highlightTargetId) return;
+    const els = document.querySelectorAll(`[data-review-row="${highlightTargetId}"]`);
+    const visibleEl = Array.from(els).find(el => (el as HTMLElement).offsetParent !== null) || els[0];
+    visibleEl?.scrollIntoView({ behavior: "smooth", block: "center" });
+    const timer = setTimeout(() => setHighlightTargetId(null), 4000);
+    return () => clearTimeout(timer);
+  }, [highlightTargetId, visibleCount]);
+
   // Dynamic badge counts based on CURRENT filter status (or overall)
   const statsCounts = useMemo(() => {
     return {
@@ -557,80 +579,34 @@ export default function ReviewArchiveTab() {
       {/* 0. Database Control & CSV Setup Banner */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
         {/* Sync Status Banner */}
-        <div className={`rounded-3xl p-6 border flex flex-col justify-between shadow-sm transition ${
-          isUsingLocalData 
-            ? "bg-amber-50/50 border-amber-200 text-amber-900" 
-            : "bg-blue-50/40 border-blue-100 text-slate-800"
-        }`}>
+        <div className="rounded-3xl p-6 border border-amber-200 bg-amber-50/50 text-amber-900 flex flex-col justify-between shadow-sm">
           <div>
             <div className="flex items-center gap-2 mb-2">
-              <Database className={`h-5 w-5 ${isUsingLocalData ? "text-amber-500" : "text-blue-600"}`} />
-              <h3 className="font-bold text-sm">
-                {isUsingLocalData ? "데이터베이스 로컬 모드" : "Cloud Firestore 실시간 연동 중"}
-              </h3>
-              <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[9px] font-bold ${
-                isUsingLocalData ? "bg-amber-100 text-amber-800" : "bg-blue-100 text-blue-800"
-              }`}>
-                {isUsingLocalData ? "로컬 백업 모드" : "실시간 클라우드 DB"}
+              <Database className="h-5 w-5 text-amber-500" />
+              <h3 className="font-bold text-sm">데이터베이스 로컬 모드</h3>
+              <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[9px] font-bold bg-amber-100 text-amber-800">
+                로컬 백업 모드
               </span>
             </div>
             <p className="text-xs leading-relaxed text-slate-500 font-medium">
-              {isUsingLocalData 
-                ? "현재 Firestore 연결 대기 중입니다. 클릭하여 클라우드 DB로 동기화하거나 아래 CSV 파싱기를 이용해 자체 후기 데이터셋을 상태에 로드할 수 있습니다." 
-                : `현재 Google Cloud Firestore의 'reviews' 컬렉션에 바인딩되어 실시간 데이터 연동 중입니다. (총 ${reviewsData.length}건 저장됨)`
-              }
+              브라우저 IndexedDB에 저장됩니다(서버 DB 연동 아님). 아래 CSV 파싱기로 후기 데이터셋을 업로드할 수 있습니다. (총 {reviewsData.length}건 저장됨)
             </p>
           </div>
 
-          {!isUsingLocalData && (
-            <div className="mt-4 flex gap-2">
-              <button
-                onClick={() => {
-                  if (confirm("CSV 업로드 이전의 원본 기본 데이터셋으로 되돌리시겠습니까?\n업로드된 CSV 및 커스텀 데이터가 초기화됩니다.")) {
-                    resetToInitialData();
-                  }
-                }}
-                disabled={isSyncing}
-                className="w-full inline-flex items-center justify-center gap-1.5 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-800 px-3 py-2 text-xs font-bold transition disabled:opacity-50 cursor-pointer shadow-sm"
-              >
-                <RefreshCw className="h-3.5 w-3.5" />
-                <span>업로드 전 초기 데이터로 되돌리기</span>
-              </button>
-            </div>
-          )}
-          {isUsingLocalData && (
-            <div className="mt-4 flex flex-col gap-2">
-              <button
-                onClick={() => {
-                  if (confirm("CSV 업로드 이전의 원본 기본 데이터셋으로 되돌리시겠습니까?")) {
-                    resetToInitialData();
-                  }
-                }}
-                disabled={isSyncing}
-                className="w-full inline-flex items-center justify-center gap-1.5 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-800 px-3 py-2 text-xs font-bold transition disabled:opacity-50 cursor-pointer shadow-sm"
-              >
-                <RefreshCw className="h-3.5 w-3.5" />
-                <span>업로드 전 초기 데이터로 되돌리기</span>
-              </button>
-              <button
-                onClick={syncWithFirestore}
-                disabled={isSyncing}
-                className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-amber-600 px-4 py-2.5 text-xs font-bold text-white hover:bg-amber-700 transition disabled:opacity-50 cursor-pointer shadow-sm"
-              >
-                {isSyncing ? (
-                  <>
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    <span>Firestore 동기화 중...</span>
-                  </>
-                ) : (
-                  <>
-                    <RefreshCw className="h-3.5 w-3.5" />
-                    <span>Firestore 클라우드 마이그레이션</span>
-                  </>
-                )}
-              </button>
-            </div>
-          )}
+          <div className="mt-4 flex gap-2">
+            <button
+              onClick={() => {
+                if (confirm("CSV 업로드 이전의 원본 기본 데이터셋으로 되돌리시겠습니까?\n업로드된 CSV 및 커스텀 데이터가 초기화됩니다.")) {
+                  resetToInitialData();
+                }
+              }}
+              disabled={isSyncing}
+              className="w-full inline-flex items-center justify-center gap-1.5 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-800 px-3 py-2 text-xs font-bold transition disabled:opacity-50 cursor-pointer shadow-sm"
+            >
+              <RefreshCw className="h-3.5 w-3.5" />
+              <span>업로드 전 초기 데이터로 되돌리기</span>
+            </button>
+          </div>
         </div>
 
         {/* CSV File Parser & VOC Classifier Card */}
@@ -1000,30 +976,32 @@ export default function ReviewArchiveTab() {
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
                     <div className="rounded-xl bg-slate-50 border border-slate-200 p-4 space-y-2">
                       <div className="flex items-center justify-between">
-                        <span className="font-bold text-slate-800">1. REST API 주기적 동기화 (Polling)</span>
-                        <span className="text-[10px] font-bold bg-slate-200 text-slate-700 px-2 py-0.5 rounded">GET /api/v1/admin/reviews</span>
+                        <span className="font-bold text-slate-800">1. REST API 새로고침 동기화 (Pull, 우선 적용)</span>
+                        <span className="text-[10px] font-bold bg-slate-200 text-slate-700 px-2 py-0.5 rounded">GET /api/v1/voc/reviews/sync</span>
                       </div>
                       <p className="text-slate-500 text-[11px] leading-relaxed">
-                        자사 어드민 서버에 수집되는 최신 고객 VOC 및 후기 목록을 JSON 엔드포인트로 제공받아 대시보드로 주기적 동기화합니다.
+                        대시보드의 '새로고침' 버튼 클릭 시, 그리고 백그라운드에서 5분 주기로 어드민 API를 당겨와(pull) 변경분만 반영합니다.
+                        `updated_since` 커서를 써서 신규 리뷰뿐 아니라 노출여부/평점이 나중에 수정된 기존 리뷰도 놓치지 않고 갱신합니다.
                       </p>
                       <div className="bg-slate-900 text-slate-100 p-2.5 rounded-lg font-mono text-[10px] overflow-x-auto">
                         {`Authorization: Bearer <ADMIN_API_TOKEN>
-GET https://admin.honestflower.kr/api/v1/voc/reviews?startDate=2026-06-01`}
+GET https://admin.honestflower.kr/api/v1/voc/reviews/sync?updated_since=2026-08-20T09:00:00Z&limit=500`}
                       </div>
                     </div>
 
                     <div className="rounded-xl bg-slate-50 border border-slate-200 p-4 space-y-2">
                       <div className="flex items-center justify-between">
-                        <span className="font-bold text-slate-800">2. 실시간 웹훅 연동 (Real-time Webhook)</span>
-                        <span className="text-[10px] font-bold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded">POST /api/voc/webhook</span>
+                        <span className="font-bold text-slate-800">2. 실시간 웹훅 연동 (향후 확장, 지금 범위 아님)</span>
+                        <span className="text-[10px] font-bold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded">POST /api/voc/webhook (계획)</span>
                       </div>
                       <p className="text-slate-500 text-[11px] leading-relaxed">
-                        고객이 자사몰/앱에서 후기를 작성하는 즉시 어드민 이벤트 웹훅이 발송되어 대시보드 및 VOC 분류 엔진에 반영됩니다.
+                        어드민이 이벤트 발신 인프라를 갖추면, 폴링 대신 review.created / review.updated / review.hidden 이벤트를 실시간으로 수신하도록
+                        전환할 수 있습니다. 지금 단계에서는 구현 범위가 아니고 향후 옵션으로만 남겨둡니다.
                       </p>
                       <div className="bg-slate-900 text-slate-100 p-2.5 rounded-lg font-mono text-[10px] overflow-x-auto">
                         {`POST /api/voc/webhook
 Content-Type: application/json
-{ "event": "review.created", "data": { "id": 201, "review": "..." } }`}
+{ "event": "review.updated", "data": { "id": "59615", "노출여부": false, "updated_at": "2026-08-20T10:15:00Z" } }`}
                       </div>
                     </div>
                   </div>
@@ -1031,7 +1009,7 @@ Content-Type: application/json
                   <div className="rounded-xl bg-indigo-50/60 border border-indigo-100 p-4 flex items-center justify-between">
                     <div className="space-y-0.5">
                       <h6 className="text-xs font-bold text-indigo-950">어드민 API 토큰 테스트 mock 콜백</h6>
-                      <p className="text-[11px] text-indigo-700">현재 CSV 파서 모듈과 동일한 `Review` 인터페이스 규격으로 인메모리 연동 준비가 완료되었습니다.</p>
+                      <p className="text-[11px] text-indigo-700">실제 연동 전, 위 `GET .../sync` 응답 스키마(CSV export와 동일한 컬럼명 사용)와 동일한 형태의 mock 데이터로 새로고침 동작을 미리 검증할 수 있습니다.</p>
                     </div>
                     <button
                       onClick={() => {
@@ -1083,6 +1061,21 @@ Content-Type: application/json
                       </div>
                     </div>
                   </div>
+
+                  {parsedCSVResult.isLikelyWrongFileType ? (
+                    <SchemaMismatchError
+                      detectedColumns={parsedCSVResult.detectedColumns}
+                      guidance={`어드민 리뷰 목록의 "내보내기" 버튼으로 받은 CSV가 맞는지 확인해주세요. 사고접수 CSV라면 "사고접수" 탭에 올려야 합니다.`}
+                    />
+                  ) : parsedCSVResult.missingCriticalColumns.length > 0 && (
+                    <div className="rounded-xl border border-amber-300 bg-amber-50 p-3.5 flex items-start gap-2.5">
+                      <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+                      <p className="text-xs text-amber-900 leading-relaxed">
+                        <span className="font-bold">다음 필수 컬럼을 인식하지 못했습니다: {parsedCSVResult.missingCriticalColumns.join(", ")}.</span>{" "}
+                        CSV 헤더명을 확인해주세요 — 인식 못한 값은 리뷰 텍스트 키워드 추정이나 기본값으로 채워져 실제와 다를 수 있습니다.
+                      </p>
+                    </div>
+                  )}
 
                   {/* Summary Metric Chips */}
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -1686,7 +1679,8 @@ Content-Type: application/json
               <tbody className="divide-y divide-slate-100">
                 {filteredAndSortedReviews.slice(0, visibleCount).map((item, index, arr) => {
                   const isExpanded = expandedReviewId === item.id;
-                  
+                  const isHighlighted = highlightTargetId === String(item.id);
+
                   // Check if this review belongs to the same post (same reviewer, date, and identical multi-product review text) as the previous one
                   const prevItem = index > 0 ? arr[index - 1] : null;
                   const isSamePostAsPrev = Boolean(prevItem && areReviewsSamePost(item, prevItem) && item.review && prevItem.review && item.review === prevItem.review);
@@ -1706,9 +1700,10 @@ Content-Type: application/json
                   return (
                     <React.Fragment key={item.id}>
                       {/* Row */}
-                      <tr 
+                      <tr
+                        data-review-row={item.id}
                         onClick={() => setExpandedReviewId(isExpanded ? null : item.id)}
-                        className={`hover:bg-slate-50/50 transition cursor-pointer select-none ${isExpanded ? "bg-brand-green-light/10" : ""} ${isSamePostAsPrev ? "bg-slate-50/10" : ""}`}
+                        className={`hover:bg-slate-50/50 transition cursor-pointer select-none ${isExpanded ? "bg-brand-green-light/10" : ""} ${isSamePostAsPrev ? "bg-slate-50/10" : ""} ${isHighlighted ? "ring-2 ring-amber-400 ring-inset" : ""}`}
                       >
                         <td className="py-3.5 px-4 text-center text-xs font-bold text-slate-700 border-r border-slate-50">
                           <div className="flex flex-col items-center justify-center gap-1">
@@ -1729,6 +1724,11 @@ Content-Type: application/json
                               {item.incidentStatus === "접수중" && (
                                 <span className="inline-flex items-center gap-0.5 rounded-md bg-amber-100 text-amber-800 border border-amber-200 px-1.5 py-0.5 text-[9px] font-bold animate-pulse">
                                   ⏳ 사고접수대기
+                                </span>
+                              )}
+                              {item.exposed === false && (
+                                <span className="inline-flex items-center gap-0.5 rounded-md bg-emerald-100 text-emerald-800 border border-emerald-200 px-1.5 py-0.5 text-[9px] font-extrabold" title="CX가 비공개 처리로 대응 완료한 리뷰 — 고객에게는 노출되지 않으며 내부 VOC로만 확인 가능">
+                                  ✅ CX 조치완료 (비공개 처리)
                                 </span>
                               )}
                               {item.image_urls && item.image_urls.length > 0 ? (
@@ -1929,7 +1929,8 @@ Content-Type: application/json
           <div className="block md:hidden divide-y divide-slate-100">
             {filteredAndSortedReviews.slice(0, visibleCount).map((item, index, arr) => {
               const isExpanded = expandedReviewId === item.id;
-              
+              const isHighlighted = highlightTargetId === String(item.id);
+
               // Check if this review belongs to the same post (same reviewer, date, and highly similar content) as the previous one
               const prevItem = index > 0 ? arr[index - 1] : null;
               const isSamePostAsPrev = prevItem && groupKeysMap.get(item.id) === groupKeysMap.get(prevItem.id);
@@ -1947,9 +1948,10 @@ Content-Type: application/json
               const dept = item.category === "상품구성/양" ? "MD" : item.category === "서비스/시스템" ? "프로덕트" : item.department;
 
               return (
-                <div 
-                  key={item.id} 
-                  className={`p-4 transition ${isExpanded ? "bg-brand-green-light/10" : "bg-white"} ${isSamePostAsPrev ? "bg-slate-50/5" : ""}`}
+                <div
+                  key={item.id}
+                  data-review-row={item.id}
+                  className={`p-4 transition ${isExpanded ? "bg-brand-green-light/10" : "bg-white"} ${isSamePostAsPrev ? "bg-slate-50/5" : ""} ${isHighlighted ? "ring-2 ring-amber-400 ring-inset" : ""}`}
                 >
                   <div 
                     onClick={() => setExpandedReviewId(isExpanded ? null : item.id)}

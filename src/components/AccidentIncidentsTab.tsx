@@ -1,4 +1,4 @@
-import { useMemo, useState, useRef } from "react";
+import { useMemo, useState, useRef, useEffect } from "react";
 import { 
   ShieldAlert, 
   AlertTriangle, 
@@ -21,10 +21,11 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { useReviews } from "../context/ReviewsContext";
-import { parseCSVToIncidents, IncidentParseResult } from "../utils/csvParser";
+import { parseCSVToIncidents, IncidentParseResult, parseCSVToProblemForms } from "../utils/csvParser";
+import SchemaMismatchError from "./SchemaMismatchError";
 
 export default function AccidentIncidentsTab() {
-  const { weeklyIncidents, incidents, importIncidents, isSyncing, weekFilter, setWeekFilter, weekRanges } = useReviews();
+  const { weeklyIncidents, incidents, importIncidents, importProblemForms, isSyncing, weekFilter, setWeekFilter, weekRanges, highlightTargetId, setHighlightTargetId } = useReviews();
 
   // Filter and Search State
   const [incidentStatusFilter, setIncidentStatusFilter] = useState<"전체" | "처리완료" | "반려됨" | "접수중">("전체");
@@ -41,10 +42,30 @@ export default function AccidentIncidentsTab() {
   const [importMode, setImportMode] = useState<"append" | "replace">("replace");
   const [importSuccessMsg, setImportSuccessMsg] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState<boolean>(false);
+  // 매출/클레임비용 탭의 ProblemForm 데이터와도 동기화한다(같은 파일을 두 파서에 모두 돌려
+  // incidents/problemForms를 함께 채움) — 업로드 지점이 어디든 대시보드 전체에 반영되도록.
+  const [lastRawText, setLastRawText] = useState<string>("");
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // 이 CSV 업로드의 수집 채널 태그(일반/플라워고) — ClaimCostTab의 ProblemForm 업로드와 동일 개념.
+  const [importChannelChoice, setImportChannelChoice] = useState<"일반" | "플라워고">("일반");
+  // 목록/KPI에 적용하는 채널 필터(전체/일반/플라워고) — 업로드 채널 선택과는 별개의 조회 필터.
+  const [channelFilter, setChannelFilter] = useState<"전체" | "일반" | "플라워고">("전체");
 
-  // Active incidents list (weekly by default)
-  const activeIncidentList = weeklyIncidents;
+  // Active incidents list (weekly by default). "전체 기간"이 이번주+저번주 2주 합산으로 스코프가
+  // 좁혀졌으므로, 알림센터에서 그보다 오래된 사고접수로 이동해온 경우엔 주차 필터와 무관하게 전체
+  // 목록에서 대상을 찾아 보여준다(그렇지 않으면 하이라이트 대상이 필터에 가려 안 보일 수 있음).
+  const activeIncidentList = useMemo(() => {
+    if (highlightTargetId && !weeklyIncidents.some(i => i.id === highlightTargetId) && incidents.some(i => i.id === highlightTargetId)) {
+      return incidents;
+    }
+    return weeklyIncidents;
+  }, [weeklyIncidents, incidents, highlightTargetId]);
+
+  // "전체 기간" 버튼에 표시할 건수 — 업로드된 전체 데이터가 아니라 이번주+저번주 2주 합산 건수(weekRanges.allPeriod)여야 한다.
+  const allPeriodIncidentCount = useMemo(
+    () => incidents.filter(i => i.date >= weekRanges.allPeriod.start && i.date <= weekRanges.allPeriod.end).length,
+    [incidents, weekRanges]
+  );
 
   // Accident KPI Metrics
   const accidentMetrics = useMemo(() => {
@@ -58,6 +79,8 @@ export default function AccidentIncidentsTab() {
       if (r.refundAmount) totalRefund += r.refundAmount;
     });
 
+    const flowergoCount = activeIncidentList.filter(r => r.importChannel === "플라워고").length;
+
     // Breakdown by accident detail type
     const detailTypeCounts: Record<string, number> = {};
     activeIncidentList.forEach(r => {
@@ -70,7 +93,7 @@ export default function AccidentIncidentsTab() {
       count
     })).sort((a, b) => b.count - a.count);
 
-    return { total, approved, rejected, pending, totalRefund, chartData };
+    return { total, approved, rejected, pending, totalRefund, flowergoCount, chartData };
   }, [activeIncidentList]);
 
   // Unique cause types for filter
@@ -87,7 +110,9 @@ export default function AccidentIncidentsTab() {
   const filteredAccidents = useMemo(() => {
     return activeIncidentList.filter(item => {
       if (incidentStatusFilter !== "전체" && item.incidentStatus !== incidentStatusFilter) return false;
-      
+
+      if (channelFilter !== "전체" && (item.importChannel || "일반") !== channelFilter) return false;
+
       const itemCause = item.accidentDetail || item.accidentType || "기타 불만";
       if (selectedCauseFilter !== "전체" && itemCause !== selectedCauseFilter) return false;
 
@@ -103,7 +128,19 @@ export default function AccidentIncidentsTab() {
       }
       return true;
     });
-  }, [activeIncidentList, incidentStatusFilter, selectedCauseFilter, incidentSearchTerm]);
+  }, [activeIncidentList, incidentStatusFilter, channelFilter, selectedCauseFilter, incidentSearchTerm]);
+
+  // 알림센터에서 특정 사고접수로 이동해왔을 때: 기본 필터(전체/전체/빈 검색어)로 마운트된 상태를
+  // 가정하고, 목록에서 대상 카드로 스크롤한다.
+  useEffect(() => {
+    if (!highlightTargetId) return;
+    const idx = filteredAccidents.findIndex(item => item.id === highlightTargetId);
+    if (idx === -1) return;
+    const el = document.querySelector(`[data-incident-row="${highlightTargetId}"]`);
+    el?.scrollIntoView({ behavior: "smooth", block: "center" });
+    const timer = setTimeout(() => setHighlightTargetId(null), 4000);
+    return () => clearTimeout(timer);
+  }, [highlightTargetId, filteredAccidents]);
 
   // Export filtered incidents to CSV
   const handleExportCSV = () => {
@@ -155,8 +192,9 @@ export default function AccidentIncidentsTab() {
     reader.onload = (event) => {
       try {
         const text = event.target?.result as string;
-        const result = parseCSVToIncidents(text);
+        const result = parseCSVToIncidents(text, importChannelChoice);
         setParsedResult(result);
+        setLastRawText(text);
       } catch (err) {
         console.error("CS CSV Parsing Error:", err);
         alert("CSV 파싱 중 오류가 발생했습니다: " + (err as Error).message);
@@ -176,8 +214,9 @@ export default function AccidentIncidentsTab() {
     if (!csvRawText.trim()) return;
     setIsParsingCSV(true);
     try {
-      const result = parseCSVToIncidents(csvRawText);
+      const result = parseCSVToIncidents(csvRawText, importChannelChoice);
       setParsedResult(result);
+      setLastRawText(csvRawText);
     } catch (err) {
       console.error("CS CSV Text Parse Error:", err);
       alert("CSV 텍스트 파싱 오류: " + (err as Error).message);
@@ -191,12 +230,29 @@ export default function AccidentIncidentsTab() {
     if (!parsedResult || parsedResult.incidents.length === 0) return;
     try {
       await importIncidents(parsedResult.incidents, importMode === "replace");
-      setImportSuccessMsg(`사고접수 데이터 ${parsedResult.validCount}건이 성공적으로 반영되었습니다! (사진 리뷰 데이터에 영향 없음)`);
+
+      // 같은 CSV를 매출/클레임비용 탭의 ProblemForm 파서로도 돌려서 함께 반영 — 업로드 지점이
+      // 어디든 대시보드 전체(매출/클레임비용 탭 계산 포함)에 동일하게 반영되도록 동기화한다.
+      let syncedProblemFormCount = 0;
+      try {
+        const pfResult = parseCSVToProblemForms(lastRawText, importChannelChoice);
+        if (pfResult.problemForms.length > 0) {
+          await importProblemForms(pfResult.problemForms, importMode === "replace");
+          syncedProblemFormCount = pfResult.validCount;
+        }
+      } catch (err) {
+        console.error("Incident -> ProblemForm 동기화 오류:", err);
+      }
+
+      setImportSuccessMsg(
+        `사고접수 데이터 ${parsedResult.validCount}건이 성공적으로 반영되었습니다! (사진 리뷰 데이터에 영향 없음)` +
+        (syncedProblemFormCount > 0 ? ` 매출/클레임비용 탭에도 ${syncedProblemFormCount}건 동기화됨.` : "")
+      );
       setTimeout(() => {
         setParsedResult(null);
         setShowCSVModal(false);
         setImportSuccessMsg(null);
-      }, 2000);
+      }, 2500);
     } catch (err) {
       console.error("Apply Incidents Error:", err);
       alert("사고접수 데이터 적용 중 오류: " + (err as Error).message);
@@ -258,7 +314,7 @@ export default function AccidentIncidentsTab() {
           <div>
             <div className="flex items-center gap-2">
               <span className="text-xs font-black text-slate-800">
-                조회 기간: {weekFilter === "this" ? weekRanges.thisWeek.label : weekFilter === "last" ? weekRanges.lastWeek.label : "전체 기간 (전체 데이터)"}
+                조회 기간: {weekFilter === "this" ? weekRanges.thisWeek.label : weekFilter === "last" ? weekRanges.lastWeek.label : weekRanges.allPeriod.label}
               </span>
               <span className="text-[10px] font-bold bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">
                 해당 기간 사고접수 {activeIncidentList.length}건
@@ -299,7 +355,7 @@ export default function AccidentIncidentsTab() {
                 : "text-slate-500 hover:text-slate-800"
             }`}
           >
-            전체 기간 ({incidents.length}건)
+            전체 기간 ({allPeriodIncidentCount}건)
           </button>
         </div>
       </div>
@@ -333,6 +389,30 @@ export default function AccidentIncidentsTab() {
                 >
                   <X className="h-4 w-4" />
                 </button>
+              </div>
+
+              {/* 사고접수 CSV 수집 채널 선택 — 일반/플라워고는 스키마가 거의 같아 CSV 자체에 구분
+                  컬럼이 없으므로, 업로드 시점에 사용자가 직접 태그해야 한다. */}
+              <div className="flex items-center gap-3 rounded-2xl border border-rose-100 bg-rose-50/30 px-4 py-3">
+                <span className="text-xs font-bold text-slate-700 shrink-0">이 CSV의 수집 채널</span>
+                <div className="flex items-center gap-2">
+                  {(["일반", "플라워고"] as const).map(ch => (
+                    <button
+                      key={ch}
+                      onClick={() => setImportChannelChoice(ch)}
+                      className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${
+                        importChannelChoice === ch ? "bg-rose-600 text-white shadow-2xs" : "bg-white text-slate-600 border border-slate-200 hover:bg-slate-50"
+                      }`}
+                    >
+                      {ch}
+                    </button>
+                  ))}
+                </div>
+                <span className="text-[11px] text-slate-400">
+                  {importChannelChoice === "플라워고"
+                    ? "flowergoproblemform 엔드포인트 export를 올릴 때 선택하세요."
+                    : "일반 bloom/problems/problemform 엔드포인트 export는 기본값 그대로 두면 됩니다."}
+                </span>
               </div>
 
               {/* Tab Selector */}
@@ -429,6 +509,11 @@ export default function AccidentIncidentsTab() {
                       <h5 className="text-sm font-bold text-slate-900">
                         파싱 검증 완료: 총 <span className="text-rose-600 font-extrabold">{parsedResult.validCount}</span>건 사고접수
                       </h5>
+                      <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full border ${
+                        importChannelChoice === "플라워고" ? "bg-fuchsia-100 text-fuchsia-800 border-fuchsia-200" : "bg-slate-100 text-slate-600 border-slate-200"
+                      }`}>
+                        수집채널: {importChannelChoice}
+                      </span>
                     </div>
 
                     <div className="flex items-center gap-3 text-xs font-medium text-slate-700">
@@ -455,6 +540,21 @@ export default function AccidentIncidentsTab() {
                       </label>
                     </div>
                   </div>
+
+                  {parsedResult.isLikelyWrongFileType ? (
+                    <SchemaMismatchError
+                      detectedColumns={parsedResult.detectedColumns}
+                      guidance={`어드민 사고접수 목록의 "내보내기" 버튼으로 받은 CSV가 맞는지 확인해주세요. 어드민의 "CS 비용 다운로드"로 받은 파일이라면 이 임포터가 아니라 "매출/클레임비용" 탭의 "CS비용 검증(선택)" 박스에 넣어야 합니다 — 스키마가 다릅니다.`}
+                    />
+                  ) : parsedResult.missingCriticalColumns.length > 0 && (
+                    <div className="rounded-xl border border-amber-300 bg-amber-50 p-3.5 flex items-start gap-2.5">
+                      <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+                      <p className="text-xs text-amber-900 leading-relaxed">
+                        <span className="font-bold">다음 필수 컬럼을 인식하지 못했습니다: {parsedResult.missingCriticalColumns.join(", ")}.</span>{" "}
+                        CSV 헤더명을 확인해주세요 — 인식 못한 값은 기본값으로 채워져 실제와 다를 수 있습니다.
+                      </p>
+                    </div>
+                  )}
 
                   {/* Summary Metric Chips */}
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -549,7 +649,7 @@ export default function AccidentIncidentsTab() {
       </AnimatePresence>
 
       {/* 사고접수 KPI Metrics Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
         {/* Total Incidents */}
         <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-2xs flex items-center justify-between">
           <div>
@@ -599,6 +699,23 @@ export default function AccidentIncidentsTab() {
             <Clock className="h-6 w-6 animate-pulse" />
           </div>
         </div>
+
+        {/* Flowergo channel count */}
+        <button
+          onClick={() => setChannelFilter(channelFilter === "플라워고" ? "전체" : "플라워고")}
+          className={`text-left rounded-3xl border p-5 shadow-2xs flex items-center justify-between transition cursor-pointer ${
+            channelFilter === "플라워고" ? "border-fuchsia-400 bg-fuchsia-50 ring-2 ring-fuchsia-300" : "border-fuchsia-200 bg-fuchsia-50/30 hover:border-fuchsia-300"
+          }`}
+        >
+          <div>
+            <p className="text-xs font-bold text-fuchsia-800">플라워고 사고접수</p>
+            <h3 className="text-2xl font-black text-fuchsia-950 mt-1">{accidentMetrics.flowergoCount}건</h3>
+            <p className="text-[10px] text-fuchsia-700 mt-1">클릭하면 플라워고만 필터링</p>
+          </div>
+          <div className="rounded-2xl bg-fuchsia-100 p-3 text-fuchsia-700">
+            <ShieldAlert className="h-6 w-6" />
+          </div>
+        </button>
       </div>
 
       {/* Accident Detail Type Cause Distribution */}
@@ -677,6 +794,21 @@ export default function AccidentIncidentsTab() {
               </button>
             ))}
 
+            {/* Channel Filter Buttons */}
+            {(["전체", "일반", "플라워고"] as const).map(ch => (
+              <button
+                key={ch}
+                onClick={() => setChannelFilter(ch)}
+                className={`px-3 py-1.5 text-xs font-bold rounded-xl transition cursor-pointer ${
+                  channelFilter === ch
+                    ? "bg-fuchsia-600 text-white shadow-2xs"
+                    : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                }`}
+              >
+                {ch === "전체" ? "전체 채널" : ch}
+              </button>
+            ))}
+
             {/* Cause Dropdown Filter */}
             <select
               value={selectedCauseFilter}
@@ -716,8 +848,14 @@ export default function AccidentIncidentsTab() {
                 statusText = "접수중 (검수대기)";
               }
 
+              const isHighlighted = highlightTargetId === item.id;
+
               return (
-                <div key={item.id} className="p-4 rounded-2xl border border-slate-100 hover:border-slate-300 bg-slate-50/40 transition space-y-3">
+                <div
+                  key={item.id}
+                  data-incident-row={item.id}
+                  className={`p-4 rounded-2xl border hover:border-slate-300 bg-slate-50/40 transition space-y-3 ${isHighlighted ? "ring-2 ring-amber-400 border-amber-300" : "border-slate-100"}`}
+                >
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="font-mono text-xs font-black bg-slate-200 text-slate-700 px-2 py-0.5 rounded-md">
@@ -726,6 +864,11 @@ export default function AccidentIncidentsTab() {
                       <span className={`inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-extrabold border ${statusBadgeClass}`}>
                         {statusText}
                       </span>
+                      {item.importChannel === "플라워고" && (
+                        <span className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-extrabold border bg-fuchsia-100 text-fuchsia-800 border-fuchsia-200">
+                          플라워고
+                        </span>
+                      )}
                       <span className="text-xs font-bold text-slate-900">
                         {item.product}
                       </span>

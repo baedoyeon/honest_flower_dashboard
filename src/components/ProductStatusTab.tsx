@@ -30,6 +30,15 @@ export default function ProductStatusTab() {
       productGroups[r.product].push(r);
     });
 
+    // 별점 리뷰가 아예 없고 CS 사고접수만 있는 상품(예: 아세비)도 후보에서 빠지지 않도록 시드해둔다.
+    // reviewsData만 순회하면 이런 상품은 productGroups에 키 자체가 안 생겨서, 아래 accidentCount>0
+    // 필터가 있어도 애초에 후보 목록에 오르지 못해 "품질 경고"에서 통째로 누락되는 문제가 있었다.
+    weeklyIncidents.forEach(inc => {
+      if (!productGroups[inc.product]) {
+        productGroups[inc.product] = [];
+      }
+    });
+
     // 2. Calculate stats for each product
     const stats = Object.entries(productGroups).map(([product, list]) => {
       const total = list.length;
@@ -64,9 +73,12 @@ export default function ProductStatusTab() {
       };
     });
 
-    // 3. Filter to products with at least some neutral or negative signal or accidents OR are generally low rated (< 4.2)
+    // 3. Filter to products with at least some neutral or negative signal or accidents OR are generally low rated (< 4.2).
+    // avgRating<4.2 조건은 실제 별점 리뷰가 있을 때만 의미가 있다 — 위에서 사고접수만으로 시드된
+    // 상품은 리뷰가 없어 avgRating이 0으로 잡히는데, 그 0을 "저평점"으로 오인해 (반려/접수중처럼)
+    // 확정된 사고가 아닌 건까지 품질 경고로 잘못 띄우면 안 된다.
     const sortedStats = stats
-      .filter(s => s.notRecommend > 0 || s.accidentCount > 0 || s.neutral > 0 || s.avgRating < 4.2)
+      .filter(s => s.notRecommend > 0 || s.accidentCount > 0 || s.neutral > 0 || (s.total > 0 && s.avgRating < 4.2))
       .sort((a, b) => b.cautionScore - a.cautionScore);
 
     // If we have fewer than 3, we append other products sorted by lowest rating
@@ -189,7 +201,7 @@ export default function ProductStatusTab() {
         recommendRate
       };
     });
-  }, [reviewsData]);
+  }, [reviewsData, weeklyIncidents]);
 
   // Filter & Sort table data
   const handleSort = (field: keyof ProductStat) => {

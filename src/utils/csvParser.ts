@@ -1,5 +1,13 @@
 import { Review } from "../data/classifiedReviews";
 import { Incident } from "../data/initialIncidents";
+import { OrderItem } from "../data/orderItems";
+import { ProblemForm } from "../data/problemForms";
+import { ChatRoom } from "../data/chatRooms";
+import {
+  detectColumns, ColumnRule, checkSchemaMismatch,
+  isIdColumn, isProductColumn, isProductNameColumn, isRatingColumn, isRefundAmountColumn,
+  isAccidentTypeColumn, isAccidentDetailColumn, isReviewerNameColumn, isIncidentStatusColumn
+} from "./csvColumnMatcher";
 
 function maskCustomerName(id: number, rawName?: string): string {
   if (rawName && rawName.trim()) {
@@ -184,6 +192,13 @@ function parseCSVRows(csvText: string): string[][] {
   return rows;
 }
 
+// 실제 ARES 어드민 export의 주문번호/그룹주문번호 값에 Excel 텍스트 강제 escape 래퍼(="...")가
+// 실제로 존재한다(예: ="26082017871915400-1"). 그대로 두면 OrderItem-ProblemForm 조인 시 문자열이
+// 정확히 일치하지 않아 매칭이 실패할 수 있으므로, FK로 쓰는 값은 항상 이 함수로 벗겨내고 저장한다.
+function stripExcelWrapper(v: string): string {
+  return v.replace(/^="|"$/g, "").trim();
+}
+
 export interface CSVParseResult {
   reviews: Review[];
   totalRows: number;
@@ -192,6 +207,12 @@ export interface CSVParseResult {
   dateRange: { start: string; end: string };
   categoriesSummary: Record<string, number>;
   typesSummary: Record<string, number>;
+  // 헤더는 인식됐지만 평점/상품명처럼 중요한 컬럼을 못 찾은 경우의 사용자용 한글 라벨 목록.
+  // 비어있지 않으면 업로드 화면에서 경고를 띄워야 한다("총점" 사고 재발 방지).
+  missingCriticalColumns: string[];
+  // true = 핵심 컬럼이 전부 안 잡혔음 — 리뷰 CSV가 아닌 완전히 다른 파일일 가능성이 큼.
+  isLikelyWrongFileType: boolean;
+  detectedColumns: string[];
 }
 
 // Main CSV Parser Function
@@ -206,82 +227,77 @@ export function parseCSVToReviews(csvText: string, startId: number = 1): CSVPars
       autoClassifiedCount: 0,
       dateRange: { start: "", end: "" },
       categoriesSummary: {},
-      typesSummary: {}
+      typesSummary: {},
+      missingCriticalColumns: [],
+      isLikelyWrongFileType: false,
+      detectedColumns: []
     };
   }
 
-  // Detect Headers
+  // Detect Headers — 공유 컬럼매칭 엔진(csvColumnMatcher.ts) 사용. rules 순서가 우선순위이며
+  // 기존 if/else-if 체인의 순서·오버라이드 동작을 그대로 옮긴 것이다.
   const headerRow = rawRows[0].map(h => h.toLowerCase());
-  let hasHeader = false;
 
-  let colId = -1;
-  let colDate = -1;
-  let colProduct = -1;
-  let colRating = -1;
-  let colReview = -1;
-  let colType = -1;
-  let colCategory = -1;
-  let colDept = -1;
-  let colReviewer = -1;
-  let colIncidentStatus = -1;
-  let colAccidentType = -1;
-  let colAccidentDetail = -1;
-  let colAccidentDesc = -1;
-  let colRefundAmount = -1;
-  let colAccidentImage = -1;
+  const reviewColumnRules: ColumnRule[] = [
+    { key: "id", test: isIdColumn },
+    {
+      key: "date",
+      test: (col) => col.includes("접수시간") || col.includes("작성일") || col.includes("등록일") || col.includes("수령일") || col.includes("접수일") || col.includes("날짜") || col === "date" || col === "일시",
+      shouldOverride: (col, hasExisting) => !hasExisting || col.includes("작성일") || col.includes("접수시간") || col.includes("접수일"),
+    },
+    { key: "product", test: isProductNameColumn },
+    { key: "product", guard: (hasExisting) => !hasExisting, test: isProductColumn },
+    { key: "rating", test: isRatingColumn },
+    { key: "incidentStatus", test: isIncidentStatusColumn },
+    { key: "accidentType", test: isAccidentTypeColumn },
+    { key: "accidentDetail", test: isAccidentDetailColumn },
+    { key: "accidentDesc", test: (col) => col.includes("사고 범위 설명") || col.includes("사고설명") || col.includes("사고내용") || col.includes("고객설명") || col.includes("접수내용") || col.includes("클레임내용") },
+    { key: "refundAmount", test: isRefundAmountColumn },
+    { key: "accidentImage", test: (col) => col.includes("사고접수 이미지") || col.includes("증빙사진") || col.includes("사고이미지") || col.includes("증빙") || (col.includes("이미지") && col.includes("사고")) || (col.includes("사진") && col.includes("사고")) },
+    // 고객이 후기 작성 시 첨부한 일반 사진(사고접수 증빙사진과는 별개) — 예: "이미지 url" 컬럼
+    { key: "reviewImage", test: (col) => col.includes("이미지") || col.includes("사진") || col === "image_url" || col === "imageurl" },
+    // 고객에게 공개 노출되는지 여부. false로 숨김 처리된 리뷰가 오히려 내부 VOC 관점에선 더 중요한
+    // 신호이므로(어드민이 문제 있다고 판단해 내린 것) 절대 필터링해서 빼면 안 되고, 캡처만 해서
+    // 화면에 구분 표시하는 용도로 쓴다.
+    { key: "exposed", test: (col) => col.includes("노출여부") || col.includes("노출") || col === "exposed" || col === "is_exposed" },
+    {
+      key: "review",
+      test: (col) => col.includes("후기") || col.includes("리뷰") || col.includes("내용") || col.includes("본문") || col.includes("고객후기") || col.includes("평가") || col === "review",
+      shouldOverride: (col, hasExisting) => !hasExisting || col.includes("후기") || col.includes("리뷰") || col.includes("본문"),
+    },
+    { key: "type", test: (col) => col.includes("추천여부") || col.includes("유형") || col.includes("구분") || col.includes("분류") || col === "type", shouldOverride: (_col, hasExisting) => !hasExisting },
+    { key: "category", test: (col) => col.includes("카테고리") || col.includes("속성") || col.includes("이슈") || col === "category" },
+    { key: "department", test: (col) => col.includes("부서") || col.includes("담당부서") || col === "department" },
+    { key: "customerId", test: (col) => col === "고객id" || col === "고객 id" || col === "customerid" },
+    { key: "reviewer", test: isReviewerNameColumn },
+  ];
 
-  headerRow.forEach((rawCol, index) => {
-    const col = rawCol.trim().replaceAll('"', '').toLowerCase();
+  const { indices: reviewCols, hasHeader } = detectColumns(headerRow, reviewColumnRules);
+  let colId = reviewCols.id;
+  let colDate = reviewCols.date;
+  let colProduct = reviewCols.product;
+  let colRating = reviewCols.rating;
+  let colReview = reviewCols.review;
+  let colType = reviewCols.type;
+  let colCategory = reviewCols.category;
+  let colDept = reviewCols.department;
+  let colReviewer = reviewCols.reviewer;
+  let colCustomerId = reviewCols.customerId;
+  let colIncidentStatus = reviewCols.incidentStatus;
+  let colAccidentType = reviewCols.accidentType;
+  let colAccidentDetail = reviewCols.accidentDetail;
+  let colAccidentDesc = reviewCols.accidentDesc;
+  let colRefundAmount = reviewCols.refundAmount;
+  let colAccidentImage = reviewCols.accidentImage;
+  let colReviewImage = reviewCols.reviewImage;
+  let colExposed = reviewCols.exposed;
 
-    if (/^(id|no|번호|index|접수번호|순번)$/i.test(col)) { 
-      colId = index; hasHeader = true; 
-    }
-    else if (col.includes("접수시간") || col.includes("작성일") || col.includes("등록일") || col.includes("수령일") || col.includes("접수일") || col.includes("날짜") || col === "date" || col === "일시") { 
-      if (colDate === -1 || col.includes("작성일") || col.includes("접수시간") || col.includes("접수일")) colDate = index; 
-      hasHeader = true; 
-    }
-    else if (col.includes("상품명") || col.includes("주문상품") || col.includes("상품") || col.includes("제품") || col === "product") { 
-      colProduct = index; hasHeader = true; 
-    }
-    else if (col.includes("별점") || col.includes("평점") || col.includes("점수") || col === "rating") { 
-      colRating = index; hasHeader = true; 
-    }
-    else if (col.includes("상태") || col.includes("처리상태") || col.includes("접수상태") || col.includes("승인여부") || col.includes("처리결과") || col.includes("진행상태") || col.includes("사고상태") || col.includes("cs상태")) { 
-      colIncidentStatus = index; hasHeader = true; 
-    }
-    else if (col.includes("사고 유형") || col.includes("사고유형") || col.includes("사고구분") || col.includes("사고분류") || col.includes("cs유형") || col.includes("cs구분") || col.includes("접수유형") || col.includes("클레임유형")) { 
-      colAccidentType = index; hasHeader = true; 
-    }
-    else if (col.includes("상세 유형") || col.includes("상세유형") || col.includes("세부분류") || col.includes("세부원인") || col.includes("사고상세") || col.includes("세부유형") || col.includes("불량원인") || col.includes("사유") || col.includes("세부사유")) { 
-      colAccidentDetail = index; hasHeader = true; 
-    }
-    else if (col.includes("사고 범위 설명") || col.includes("사고설명") || col.includes("사고내용") || col.includes("고객설명") || col.includes("접수내용") || col.includes("클레임내용")) { 
-      colAccidentDesc = index; hasHeader = true; 
-    }
-    else if (col.includes("환불 금액") || col.includes("환불금액") || col.includes("보상금액") || col.includes("환불금") || col.includes("보상금") || col.includes("환불") || col.includes("보상")) { 
-      colRefundAmount = index; hasHeader = true; 
-    }
-    else if (col.includes("사고접수 이미지") || col.includes("증빙사진") || col.includes("사고이미지") || col.includes("증빙") || (col.includes("이미지") && col.includes("사고")) || (col.includes("사진") && col.includes("사고"))) { 
-      colAccidentImage = index; hasHeader = true; 
-    }
-    else if (col.includes("후기") || col.includes("리뷰") || col.includes("내용") || col.includes("본문") || col.includes("고객후기") || col.includes("평가") || col === "review") { 
-      if (colReview === -1 || col.includes("후기") || col.includes("리뷰") || col.includes("본문")) colReview = index; 
-      hasHeader = true; 
-    }
-    else if (col.includes("추천여부") || col.includes("유형") || col.includes("구분") || col.includes("분류") || col === "type") { 
-      if (colType === -1) colType = index;
-      hasHeader = true; 
-    }
-    else if (col.includes("카테고리") || col.includes("속성") || col.includes("이슈") || col === "category") { 
-      colCategory = index; hasHeader = true; 
-    }
-    else if (col.includes("부서") || col.includes("담당부서") || col === "department") { 
-      colDept = index; hasHeader = true; 
-    }
-    else if (col.includes("작성자") || col.includes("고객명") || col.includes("주문자") || col.includes("이름") || col.includes("성함") || col.includes("고객") || col === "reviewer") { 
-      colReviewer = index; hasHeader = true; 
-    }
-  });
+  // 평점/상품명은 리뷰 데이터의 핵심 필드라 못 찾으면 추측(키워드 매칭·기본값)으로 채워지는데,
+  // 이게 바로 "총점" 사고의 정체였다 — 조용히 넘어가지 않고 업로드 화면에 경고로 띄운다.
+  const { isLikelyWrongFileType, missingCriticalColumns, detectedColumns } = checkSchemaMismatch(hasHeader, reviewCols, [
+    { key: "rating", label: "평점(총점/별점/평점/점수)" },
+    { key: "product", label: "상품명" },
+  ], rawRows[0]);
 
   const dataRows = hasHeader ? rawRows.slice(1) : rawRows;
 
@@ -358,8 +374,19 @@ export function parseCSVToReviews(csvText: string, startId: number = 1): CSVPars
 
     let accidentType = colAccidentType !== -1 && row[colAccidentType] ? row[colAccidentType].trim() : undefined;
     let accidentDetail = colAccidentDetail !== -1 && row[colAccidentDetail] ? row[colAccidentDetail].trim() : undefined;
-    let refundAmount = colRefundAmount !== -1 && row[colRefundAmount] && !isNaN(Number(row[colRefundAmount].replace(/[^0-9]/g, ""))) ? Number(row[colRefundAmount].replace(/[^0-9]/g, "")) : undefined;
-    let image_url = colAccidentImage !== -1 && row[colAccidentImage] ? row[colAccidentImage].replace(/="|"$/g, "").trim() : undefined;
+    let refundAmount = colRefundAmount !== -1 && row[colRefundAmount] && !isNaN(Number(row[colRefundAmount].replace(/[^0-9.-]/g, ""))) ? Math.round(Number(row[colRefundAmount].replace(/[^0-9.-]/g, ""))) : undefined;
+    let image_url = colAccidentImage !== -1 && row[colAccidentImage]
+      ? row[colAccidentImage].replace(/="|"$/g, "").trim()
+      : (colReviewImage !== -1 && row[colReviewImage] ? row[colReviewImage].replace(/="|"$/g, "").trim() : undefined);
+
+    // 기본값은 true(노출 중) — 신규 리뷰는 어드민에서 기본적으로 노출 체크 상태로 생성되고,
+    // 컬럼이 없거나 빈 값인 CSV(옛 스키마)도 "아직 모름"이 아니라 "노출 중"으로 간주한다.
+    // 명시적으로 false 계열 값(미노출/비노출/N/0/아니오 등)으로 표기된 경우만 false로 뒤집는다.
+    let exposed: boolean = true;
+    if (colExposed !== -1 && row[colExposed]) {
+      const rawExposed = row[colExposed].trim().toLowerCase();
+      if (["false", "n", "0", "아니오", "미노출", "비노출"].includes(rawExposed)) exposed = false;
+    }
 
     let rawType = colType !== -1 && row[colType] ? row[colType].trim() : "";
 
@@ -462,6 +489,9 @@ export function parseCSVToReviews(csvText: string, startId: number = 1): CSVPars
     let rawReviewer = colReviewer !== -1 ? row[colReviewer] : "";
     let reviewer = maskCustomerName(rawId, rawReviewer);
 
+    // Resolve Customer ID (preferred identifier over reviewer name when present)
+    let rawCustomerId = colCustomerId !== -1 && row[colCustomerId] ? stripExcelWrapper(row[colCustomerId]) : undefined;
+
     // User Rule: Separate CS Accident Reports from Customer '비추천' Reviews.
     // - If CSV contains explicit rating (1~5), set exact rating & type (1~2: 비추천, 3: 중립, 4~5: 추천).
     // - If CS accident row is unrated (no customer star review), set rating = 0 (unrated) and do NOT force '비추천'.
@@ -494,6 +524,8 @@ export function parseCSVToReviews(csvText: string, startId: number = 1): CSVPars
     };
 
     if (rawReviewer !== undefined) itemObj.rawReviewer = rawReviewer;
+    if (rawCustomerId !== undefined) itemObj.rawCustomerId = rawCustomerId;
+    if (exposed !== undefined) itemObj.exposed = exposed;
     if (image_url !== undefined) itemObj.image_url = image_url;
     if (incidentStatus !== undefined) itemObj.incidentStatus = incidentStatus;
     if (accidentType !== undefined) itemObj.accidentType = accidentType;
@@ -511,7 +543,13 @@ export function parseCSVToReviews(csvText: string, startId: number = 1): CSVPars
     // Find if there's already an existing review for the exact same explicit raw customer + product + date, or identical review content
     const existingIndex = mergedReviews.findIndex(m => {
       if (m.id === item.id) return true;
-      
+
+      // Customer ID is the most reliable identifier when present (avoids reviewer-name/phone-number mixups)
+      const hasCustomerIds = Boolean(item.rawCustomerId && m.rawCustomerId);
+      if (hasCustomerIds) {
+        return item.rawCustomerId === m.rawCustomerId && m.product === item.product && m.date === item.date;
+      }
+
       const hasExplicitRawReviewers = Boolean(item.rawReviewer && m.rawReviewer && item.rawReviewer.trim() && m.rawReviewer.trim());
       if (hasExplicitRawReviewers) {
         return item.rawReviewer!.trim() === m.rawReviewer!.trim() && m.product === item.product && m.date === item.date;
@@ -606,7 +644,10 @@ export function parseCSVToReviews(csvText: string, startId: number = 1): CSVPars
     autoClassifiedCount,
     dateRange,
     categoriesSummary: finalCategoriesSummary,
-    typesSummary: finalTypesSummary
+    typesSummary: finalTypesSummary,
+    missingCriticalColumns,
+    isLikelyWrongFileType,
+    detectedColumns
   };
 }
 
@@ -620,6 +661,9 @@ export interface IncidentParseResult {
   dateRange: { start: string; end: string };
   accidentDetailsSummary: Record<string, number>;
   totalRefundAmount: number;
+  missingCriticalColumns: string[];
+  isLikelyWrongFileType: boolean;
+  detectedColumns: string[];
 }
 
 // Automatic format detector: Identifies if a CSV is a Review CSV or a CS Incident CSV
@@ -647,7 +691,7 @@ export function detectCSVType(csvText: string): "reviews" | "incidents" {
 }
 
 // Main CS Accident Incidents CSV Parser Function
-export function parseCSVToIncidents(csvText: string): IncidentParseResult {
+export function parseCSVToIncidents(csvText: string, importChannel: "일반" | "플라워고" = "일반"): IncidentParseResult {
   const rawRows = parseCSVRows(csvText);
 
   if (rawRows.length === 0) {
@@ -660,72 +704,58 @@ export function parseCSVToIncidents(csvText: string): IncidentParseResult {
       pendingCount: 0,
       dateRange: { start: "", end: "" },
       accidentDetailsSummary: {},
-      totalRefundAmount: 0
+      totalRefundAmount: 0,
+      missingCriticalColumns: [],
+      isLikelyWrongFileType: false,
+      detectedColumns: []
     };
   }
 
-  // Detect Headers
+  // Detect Headers — 공유 컬럼매칭 엔진 사용(csvColumnMatcher.ts).
   const headerRow = rawRows[0].map(h => h.toLowerCase());
-  let hasHeader = false;
 
-  let colId = -1;
-  let colDate = -1;
-  let colProduct = -1;
-  let colReviewer = -1;
-  let colStatus = -1;
-  let colAccidentType = -1;
-  let colAccidentDetail = -1;
-  let colClaimText = -1;
-  let colRefundAmount = -1;
-  let colImage = -1;
-  let colOrderNo = -1;
-  let colCsResponse = -1;
+  const incidentColumnRules: ColumnRule[] = [
+    { key: "id", test: isIdColumn },
+    { key: "date", test: (col) => col === "접수시간" || col === "접수일자" || col === "접수일" || col === "등록일" || col === "작성일" || col === "date" || col === "created_at" },
+    {
+      key: "date",
+      guard: (hasExisting) => !hasExisting,
+      test: (col) => (col.includes("접수시간") || col.includes("접수일") || col.includes("작성일") || col.includes("등록일") || col.includes("날짜")) && !col.includes("재접수") && !col.includes("완료시간") && !col.includes("수령일"),
+    },
+    { key: "product", test: (col) => col.includes("상품명") || col.includes("주문상품") || col === "product" },
+    { key: "product", guard: (hasExisting) => !hasExisting, test: (col) => col.includes("상품") },
+    { key: "reviewer", test: isReviewerNameColumn },
+    { key: "status", test: isIncidentStatusColumn },
+    { key: "accidentType", test: isAccidentTypeColumn },
+    { key: "accidentDetail", test: isAccidentDetailColumn },
+    { key: "claimText", test: (col) => col.includes("사고 범위 설명") || col.includes("사고설명") || col.includes("사고내용") || col.includes("고객설명") || col.includes("접수내용") || col.includes("내용") || col === "claim" || col === "review" },
+    { key: "refundAmount", test: isRefundAmountColumn },
+    { key: "image", test: (col) => col.includes("이미지") || col.includes("사진") || col.includes("증빙") || col === "image_url" },
+    { key: "orderNo", test: (col) => col.includes("주문번호") || col.includes("주문id") || col === "orderno" || col === "order_id" },
+    { key: "csResponse", test: (col) => col.includes("답변") || col.includes("조치") || col.includes("cs답변") || col.includes("처리내용") || col === "response" },
+  ];
 
-  headerRow.forEach((rawCol, index) => {
-    const col = rawCol.trim().replaceAll('"', '').toLowerCase();
+  const { indices: incCols, hasHeader } = detectColumns(headerRow, incidentColumnRules);
+  let colId = incCols.id;
+  let colDate = incCols.date;
+  let colProduct = incCols.product;
+  let colReviewer = incCols.reviewer;
+  let colStatus = incCols.status;
+  let colAccidentType = incCols.accidentType;
+  let colAccidentDetail = incCols.accidentDetail;
+  let colClaimText = incCols.claimText;
+  let colRefundAmount = incCols.refundAmount;
+  let colImage = incCols.image;
+  let colOrderNo = incCols.orderNo;
+  let colCsResponse = incCols.csResponse;
 
-    if (/^(id|no|번호|index|접수번호|순번)$/i.test(col)) {
-      colId = index; hasHeader = true;
-    }
-    else if (col === "접수시간" || col === "접수일자" || col === "접수일" || col === "등록일" || col === "작성일" || col === "date" || col === "created_at") {
-      colDate = index; hasHeader = true;
-    }
-    else if (colDate === -1 && (col.includes("접수시간") || col.includes("접수일") || col.includes("작성일") || col.includes("등록일") || col.includes("날짜"))) {
-      if (!col.includes("재접수") && !col.includes("완료시간") && !col.includes("수령일")) {
-        colDate = index; hasHeader = true;
-      }
-    }
-    else if (col.includes("상품명") || col.includes("주문상품") || col.includes("상품") || col === "product") {
-      colProduct = index; hasHeader = true;
-    }
-    else if (col.includes("작성자") || col.includes("고객명") || col.includes("주문자") || col.includes("이름") || col === "reviewer" || col === "customer") {
-      colReviewer = index; hasHeader = true;
-    }
-    else if (col.includes("상태") || col.includes("처리상태") || col.includes("접수상태") || col.includes("승인여부") || col.includes("처리결과") || col.includes("진행상태") || col.includes("status")) {
-      colStatus = index; hasHeader = true;
-    }
-    else if (col.includes("사고 유형") || col.includes("사고유형") || col.includes("사고구분") || col.includes("사고분류") || col.includes("cs유형") || col.includes("대분류")) {
-      colAccidentType = index; hasHeader = true;
-    }
-    else if (col.includes("상세 유형") || col.includes("상세유형") || col.includes("세부분류") || col.includes("세부원인") || col.includes("사고상세") || col.includes("소분류") || col.includes("사유")) {
-      colAccidentDetail = index; hasHeader = true;
-    }
-    else if (col.includes("사고 범위 설명") || col.includes("사고설명") || col.includes("사고내용") || col.includes("고객설명") || col.includes("접수내용") || col.includes("내용") || col === "claim" || col === "review") {
-      colClaimText = index; hasHeader = true;
-    }
-    else if (col.includes("환불 금액") || col.includes("환불금액") || col.includes("보상금액") || col.includes("환불") || col.includes("보상") || col === "refund") {
-      colRefundAmount = index; hasHeader = true;
-    }
-    else if (col.includes("이미지") || col.includes("사진") || col.includes("증빙") || col === "image_url") {
-      colImage = index; hasHeader = true;
-    }
-    else if (col.includes("주문번호") || col.includes("주문id") || col === "orderno" || col === "order_id") {
-      colOrderNo = index; hasHeader = true;
-    }
-    else if (col.includes("답변") || col.includes("조치") || col.includes("cs답변") || col.includes("처리내용") || col === "response") {
-      colCsResponse = index; hasHeader = true;
-    }
-  });
+  // "상품명"은 다른 종류의 CSV(예: CS비용 다운로드 export)에도 흔히 있어 구분력이 약하므로,
+  // 이 사고접수 전용 임포터에서만 나오는 개념(사고유형/사고내용)으로 판단한다 — 그래야
+  // "완전히 다른 파일을 잘못 올렸다"는 신호(isLikelyWrongFileType)가 오탐 없이 정확해진다.
+  const { isLikelyWrongFileType, missingCriticalColumns, detectedColumns } = checkSchemaMismatch(hasHeader, incCols, [
+    { key: "claimText", label: "사고 범위 설명/사고내용" },
+    { key: "accidentType", label: "사고 유형" },
+  ], rawRows[0]);
 
   const dataRows = hasHeader ? rawRows.slice(1) : rawRows;
   const rawIncidents: Incident[] = [];
@@ -776,7 +806,7 @@ export function parseCSVToIncidents(csvText: string): IncidentParseResult {
     
     let refundAmount = 0;
     if (colRefundAmount !== -1 && row[colRefundAmount]) {
-      const numericVal = parseInt(row[colRefundAmount].replace(/[^0-9]/g, ""), 10);
+      const numericVal = Math.round(parseFloat(row[colRefundAmount].replace(/[^0-9.-]/g, "")));
       if (!isNaN(numericVal)) refundAmount = numericVal;
     }
 
@@ -798,7 +828,8 @@ export function parseCSVToIncidents(csvText: string): IncidentParseResult {
       refundAmount: refundAmount > 0 ? refundAmount : undefined,
       image_url: image_url || undefined,
       orderNumber: orderNumber || undefined,
-      csResponse: csResponse || undefined
+      csResponse: csResponse || undefined,
+      importChannel
     });
   });
 
@@ -881,6 +912,715 @@ export function parseCSVToIncidents(csvText: string): IncidentParseResult {
     pendingCount,
     dateRange,
     accidentDetailsSummary,
-    totalRefundAmount
+    totalRefundAmount,
+    missingCriticalColumns,
+    isLikelyWrongFileType,
+    detectedColumns
+  };
+}
+
+export interface OrderItemParseResult {
+  orderItems: OrderItem[];
+  totalRows: number;
+  validCount: number;
+  reshipCount: number;
+  dateRange: { start: string; end: string };
+  totalRefundAmount: number;
+  missingCriticalColumns: string[];
+  isLikelyWrongFileType: boolean;
+  detectedColumns: string[];
+}
+
+// Main OrderItem CSV Parser Function (ARES III `bloom/orders/orderitem/` export, 32 columns)
+export function parseCSVToOrderItems(csvText: string): OrderItemParseResult {
+  const rawRows = parseCSVRows(csvText);
+
+  if (rawRows.length === 0) {
+    return {
+      orderItems: [],
+      totalRows: 0,
+      validCount: 0,
+      reshipCount: 0,
+      dateRange: { start: "", end: "" },
+      totalRefundAmount: 0,
+      missingCriticalColumns: [],
+      isLikelyWrongFileType: false,
+      detectedColumns: []
+    };
+  }
+
+  // Detect Headers — 공유 컬럼매칭 엔진 사용(csvColumnMatcher.ts).
+  const headerRow = rawRows[0].map(h => h.toLowerCase());
+
+  const orderItemColumnRules: ColumnRule[] = [
+    { key: "id", test: isIdColumn },
+    { key: "groupOrderNumber", test: (col) => col.includes("그룹주문번호") || col.includes("그룹 주문번호") },
+    { key: "paymentDate", test: (col) => col.includes("결제일") },
+    { key: "orderNumber", test: (col) => col.includes("주문번호") && !col.includes("외부") && !col.includes("세부채널") },
+    { key: "product", test: (col) => col.includes("상품 상세 명") || col.includes("상품상세명") },
+    { key: "product", guard: (hasExisting) => !hasExisting, test: (col) => col.includes("상품 상세") || col.includes("상품명") || col === "상품" },
+    // 기존 수령일은 별도 참고용 컬럼이라 매핑하지 않음(수령일과 구분만 함) — 아래 "수령일" 규칙에
+    // 잘못 걸리지 않도록 여기서 조용히 소비만 하고 아무 필드에도 배정하지 않는다.
+    { key: null, test: (col) => col.includes("기존 수령일") || col.includes("기존수령일") },
+    { key: "deliveryDate", test: (col) => col.includes("수령일") },
+    { key: "settlementPrice", test: (col) => col.includes("정산 가격") || col.includes("정산가격") || col.includes("정산 금액") },
+    { key: "price", guard: (hasExisting) => !hasExisting, test: (col) => col.includes("가격") },
+    { key: "quantity", test: (col) => col.includes("수량") },
+    { key: "claimStatus", test: (col) => col.includes("claim") || col.includes("클레임") },
+    { key: "farmSettlementRatio", test: (col) => col.includes("농가정산비율") || col.includes("농가 정산 비율") || col.includes("농가정산 비율") },
+    { key: "refundAmount", test: (col) => col.includes("환불금액") || col.includes("환불 금액") },
+    { key: "customerName", test: (col) => col.includes("이름") || col === "customer" },
+    { key: "orderTitle", test: (col) => col.includes("주문서 제목") || col.includes("주문자 제목") },
+  ];
+
+  const { indices: orderCols, hasHeader } = detectColumns(headerRow, orderItemColumnRules);
+  let colId = orderCols.id;
+  let colPaymentDate = orderCols.paymentDate;
+  let colGroupOrderNumber = orderCols.groupOrderNumber;
+  let colOrderNumber = orderCols.orderNumber;
+  let colProduct = orderCols.product;
+  let colDeliveryDate = orderCols.deliveryDate;
+  let colPrice = orderCols.price;
+  let colSettlementPrice = orderCols.settlementPrice;
+  let colQuantity = orderCols.quantity;
+  let colClaimStatus = orderCols.claimStatus;
+  let colFarmSettlementRatio = orderCols.farmSettlementRatio;
+  let colRefundAmount = orderCols.refundAmount;
+  let colCustomerName = orderCols.customerName;
+  let colOrderTitle = orderCols.orderTitle;
+
+  const { isLikelyWrongFileType, missingCriticalColumns, detectedColumns } = checkSchemaMismatch(hasHeader, orderCols, [
+    { key: "paymentDate", label: "결제일" },
+    { key: "orderNumber", label: "주문번호" },
+    { key: "product", label: "상품 상세 명/상품명" },
+  ], rawRows[0]);
+
+  const dataRows = hasHeader ? rawRows.slice(1) : rawRows;
+  const rawOrderItems: OrderItem[] = [];
+
+  dataRows.forEach((row, idx) => {
+    if (row.length === 0 || (row.length === 1 && !row[0])) return;
+
+    const rowNum = idx + 1;
+    const rawId = colId !== -1 && row[colId] ? row[colId].trim() : "";
+
+    const orderNumber = colOrderNumber !== -1 && row[colOrderNumber] ? stripExcelWrapper(row[colOrderNumber]) : "";
+    const id = rawId || orderNumber || `ORD-${String(rowNum).padStart(4, "0")}`;
+
+    let paymentDate = colPaymentDate !== -1 && row[colPaymentDate] ? normalizeDateStr(row[colPaymentDate]) : "";
+    let deliveryDate = colDeliveryDate !== -1 && row[colDeliveryDate] ? normalizeDateStr(row[colDeliveryDate]) : "";
+
+    const product = colProduct !== -1 && row[colProduct] ? row[colProduct].trim() : "알 수 없는 상품";
+    const groupOrderNumber = colGroupOrderNumber !== -1 && row[colGroupOrderNumber] ? stripExcelWrapper(row[colGroupOrderNumber]) : undefined;
+
+    // "정산 가격" 등 일부 컬럼은 어드민에서 "6000.0"처럼 소수점 붙은 float로 export된다.
+    // 예전엔 [^0-9]로 숫자 아닌 문자를 전부 제거했는데, 그러면 소수점(".")도 같이 사라져서
+    // "6000.0" → "60000"으로 10배 부풀려지는 사고가 실측으로 확인됨(재발송비용 전반에 영향).
+    // 소수점/부호는 남기고 parseFloat로 정확히 읽은 뒤 정수 원 단위로 반올림한다.
+    const parseNumeric = (colIdx: number): number | undefined => {
+      if (colIdx === -1 || !row[colIdx]) return undefined;
+      const numericVal = parseFloat(row[colIdx].replace(/[^0-9.-]/g, ""));
+      return isNaN(numericVal) ? undefined : Math.round(numericVal);
+    };
+
+    const price = parseNumeric(colPrice);
+    const settlementPrice = parseNumeric(colSettlementPrice);
+    const quantity = parseNumeric(colQuantity);
+    const refundAmount = parseNumeric(colRefundAmount);
+
+    const claimStatus = colClaimStatus !== -1 && row[colClaimStatus] ? row[colClaimStatus].trim() : undefined;
+    const farmSettlementRatio = colFarmSettlementRatio !== -1 && row[colFarmSettlementRatio] ? row[colFarmSettlementRatio].trim() : undefined;
+    const customerName = colCustomerName !== -1 && row[colCustomerName] ? row[colCustomerName].trim() : undefined;
+    const orderTitle = colOrderTitle !== -1 && row[colOrderTitle] ? row[colOrderTitle].trim() : undefined;
+
+    const isReshipCost = orderNumber.trim().toUpperCase().endsWith("-CS");
+
+    if (!paymentDate && !orderNumber) return; // skip fully empty/garbage rows
+
+    rawOrderItems.push({
+      id,
+      paymentDate,
+      groupOrderNumber,
+      orderNumber,
+      product,
+      deliveryDate,
+      price,
+      settlementPrice,
+      quantity,
+      claimStatus,
+      farmSettlementRatio,
+      refundAmount,
+      isReshipCost,
+      customerName,
+      orderTitle
+    });
+  });
+
+  // Deduplicate by exact orderNumber match (natural unique key, unlike Incident's fuzzy matching)
+  const orderItemsMap = new Map<string, OrderItem>();
+  rawOrderItems.forEach(item => {
+    const key = item.orderNumber || item.id;
+    const existing = orderItemsMap.get(key);
+    if (existing) {
+      if (item.refundAmount !== undefined && existing.refundAmount === undefined) existing.refundAmount = item.refundAmount;
+      if (item.settlementPrice !== undefined && existing.settlementPrice === undefined) existing.settlementPrice = item.settlementPrice;
+    } else {
+      orderItemsMap.set(key, item);
+    }
+  });
+
+  const orderItems = Array.from(orderItemsMap.values());
+
+  const dates: string[] = [];
+  let totalRefundAmount = 0;
+  let reshipCount = 0;
+  orderItems.forEach(item => {
+    if (item.paymentDate) dates.push(item.paymentDate);
+    if (item.refundAmount) totalRefundAmount += item.refundAmount;
+    if (item.isReshipCost) reshipCount++;
+  });
+  dates.sort();
+  const dateRange = {
+    start: dates.length > 0 ? dates[0] : "",
+    end: dates.length > 0 ? dates[dates.length - 1] : ""
+  };
+
+  return {
+    orderItems,
+    totalRows: dataRows.length,
+    validCount: orderItems.length,
+    reshipCount,
+    dateRange,
+    totalRefundAmount,
+    missingCriticalColumns,
+    isLikelyWrongFileType,
+    detectedColumns
+  };
+}
+
+export interface ProblemFormParseResult {
+  problemForms: ProblemForm[];
+  totalRows: number;
+  validCount: number;
+  totalRefundAmount: number;
+  missingCriticalColumns: string[];
+  isLikelyWrongFileType: boolean;
+  detectedColumns: string[];
+}
+
+// Main ProblemForm(사고접수) CSV Parser Function — 클레임코스트 계산에 필요한 필드만 파싱한다
+// (접수시간/재접수시간/환불시간/반려시간 등 라이프사이클 필드는 Phase 2.3 아카이브 탭에서 다룸).
+// 채널(일반/B2B 등)은 파싱해서 보존하되, Phase 1 계산/화면에서는 채널 구분 없이 통합 처리한다.
+//
+// importChannel: 플라워고 사고접수(`/bloom/problems/problemform/`와 스키마가 거의 동일한 별도
+// 엔드포인트)는 CSV 자체에 채널 구분 컬럼이 없어 업로드 시점에 사용자가 지정한 값을 그대로 태그한다.
+// 컬럼명 차이(그룹주문번호→주문번호 FK, 사고 처리 비율 %→사고 범위 %, 환불 적립금 신규 필드)는
+// 아래 rules에 별칭으로 추가해뒀기 때문에, 어느 채널 CSV든 같은 파서가 자동으로 올바르게 인식한다 —
+// importChannel 파라미터는 오직 결과 태깅용이고 파싱 로직 분기에는 쓰이지 않는다.
+export function parseCSVToProblemForms(csvText: string, importChannel: "일반" | "플라워고" = "일반"): ProblemFormParseResult {
+  const rawRows = parseCSVRows(csvText);
+
+  if (rawRows.length === 0) {
+    return {
+      problemForms: [],
+      totalRows: 0,
+      validCount: 0,
+      totalRefundAmount: 0,
+      missingCriticalColumns: [],
+      isLikelyWrongFileType: false,
+      detectedColumns: []
+    };
+  }
+
+  const headerRow = rawRows[0].map(h => h.toLowerCase());
+
+  const problemFormColumnRules: ColumnRule[] = [
+    { key: "id", test: isIdColumn },
+    // FK 조인 키: 실제 어드민 export는 "주문번호" 컬럼명을 쓴다(옛 목업 스키마의 "주문 아이템"이 아님).
+    // 플라워고 CSV는 "상품주문번호"가 항상 빈 값이고 대신 "그룹주문번호"가 실제 FK 역할을 한다 —
+    // "상품주문번호"도 문자열상 "주문번호"를 포함하므로, 먼저 매칭되면 빈 값으로 override해버려
+    // 모든 행이 조용히 스킵되는 사고가 날 뻔했다(실제 CSV로 검증하다 발견). 그래서 "그룹주문번호"/
+    // "주문번호"(정확 매칭류)를 높은 우선순위로 먼저 잡고, "상품주문번호"는 그게 비어있을 때만
+    // 후순위 폴백으로 둔다. 재접수시간/처리완료시간과 헷갈리지 않도록 "접수시간"만 명시적으로 잡는다.
+    {
+      key: "orderItemRef",
+      test: (col) => col.includes("그룹주문번호") || col.includes("그룹 주문번호") || col.includes("주문 아이템") || col.includes("주문아이템") ||
+        (col.includes("주문번호") && !col.includes("상품주문번호") && !col.includes("상품 주문번호")),
+    },
+    { key: "orderItemRef", guard: (hasExisting) => !hasExisting, test: (col) => col.includes("상품주문번호") || col.includes("상품 주문번호") },
+    { key: "receivedDate", test: (col) => col === "접수시간" || (col.includes("접수시간") && !col.includes("재접수")) },
+    { key: "accidentType", test: isAccidentTypeColumn },
+    { key: "accidentDetail", test: isAccidentDetailColumn },
+    { key: "handlingMethod", test: (col) => col.includes("처리 방법") || col.includes("처리방법") },
+    { key: "producerSettlement", test: (col) => col.includes("생산자 정산") || col.includes("생산자정산") },
+    { key: "courierSettlement", test: (col) => col.includes("택배사 정산") || col.includes("택배사정산") },
+    // "고객 입력 사고 범위 %"(고객 최초 신고값)는 참고용일 뿐 최종 확정치가 아니므로 명시적으로 제외하고,
+    // "사고 범위 %"(최종 확정값)와 "사고 범위 설명"만 각각 걸러서 처리한다 — 아래 "사고 범위" 규칙에
+    // 잘못 걸리지 않도록 여기서 조용히 소비만 한다.
+    { key: null, test: (col) => col.includes("고객 입력") && (col.includes("사고 범위") || col.includes("사고범위")) },
+    // 플라워고는 "사고 범위 %"/"고객 입력 사고 범위 %" 두 필드가 아니라 "사고 처리 비율 %" 하나로
+    // 통합돼 있다 — 기존 accidentScope(최종 확정값)에 그대로 매핑.
+    { key: "accidentScope", test: (col) => ((col.includes("사고 범위") || col.includes("사고범위")) && !col.includes("설명")) || col.includes("사고 처리 비율") || col.includes("사고처리비율") },
+    { key: "channel", test: (col) => col.includes("채널") },
+    { key: "status", test: (col) => col === "상태" || col.includes("처리상태") || col.includes("접수상태") },
+    { key: "refundAmount", test: (col) => col.includes("환불 금액") || col.includes("환불금액") },
+    // 플라워고 전용 — 적립금 환불액. 현금환불(환불 금액)과는 별개 필드로 보존(합산하지 않음).
+    { key: "pointRefundAmount", test: (col) => col.includes("환불 적립금") || col.includes("환불적립금") },
+  ];
+
+  const { indices: pfCols, hasHeader } = detectColumns(headerRow, problemFormColumnRules);
+  let colId = pfCols.id;
+  let colOrderItemRef = pfCols.orderItemRef;
+  let colReceivedDate = pfCols.receivedDate;
+  let colAccidentType = pfCols.accidentType;
+  let colAccidentDetail = pfCols.accidentDetail;
+  let colHandlingMethod = pfCols.handlingMethod;
+  let colProducerSettlement = pfCols.producerSettlement;
+  let colCourierSettlement = pfCols.courierSettlement;
+  let colAccidentScope = pfCols.accidentScope;
+  let colChannel = pfCols.channel;
+  let colStatus = pfCols.status;
+  let colRefundAmount = pfCols.refundAmount;
+  let colPointRefundAmount = pfCols.pointRefundAmount;
+
+  // 주문번호(FK)를 못 찾으면 모든 행이 조인 불가로 조용히 스킵되므로, 이건 다른 필드보다 훨씬
+  // 치명적이라 반드시 경고해야 한다. accidentType/accidentDetail/refundAmount는 실제로 헤더가
+  // 비슷한 이름의 다른 export(예: 어드민 "CS 비용 다운로드" — 상품명/처리방법/CS 비용(원)만 있고
+  // 사고 유형/상세 유형/환불 금액은 없음)와 혼동해서 잘못 올리는 사고가 실제로 있었던 컬럼들이라,
+  // 이 4개가 전부 안 잡히면 "사고접수 CSV가 아니다"로 판단한다(isLikelyWrongFileType).
+  const { isLikelyWrongFileType, missingCriticalColumns, detectedColumns } = checkSchemaMismatch(hasHeader, pfCols, [
+    { key: "orderItemRef", label: "주문번호(FK)" },
+    { key: "accidentType", label: "사고 유형" },
+    { key: "accidentDetail", label: "상세 유형" },
+    { key: "refundAmount", label: "환불 금액" },
+  ], rawRows[0]);
+
+  const dataRows = hasHeader ? rawRows.slice(1) : rawRows;
+  const problemForms: ProblemForm[] = [];
+  let totalRefundAmount = 0;
+
+  dataRows.forEach((row, idx) => {
+    if (row.length === 0 || (row.length === 1 && !row[0])) return;
+
+    const rowNum = idx + 1;
+    const rawId = colId !== -1 && row[colId] ? row[colId].trim() : "";
+    const id = rawId || `PF-${String(rowNum).padStart(4, "0")}`;
+
+    const orderItemRef = colOrderItemRef !== -1 && row[colOrderItemRef] ? stripExcelWrapper(row[colOrderItemRef]) : "";
+    if (!orderItemRef) return; // FK 없는 행은 클레임코스트 계산에 쓸 수 없으므로 스킵
+
+    const receivedDate = colReceivedDate !== -1 && row[colReceivedDate] ? normalizeDateStr(row[colReceivedDate]) : undefined;
+    const accidentType = colAccidentType !== -1 && row[colAccidentType] ? row[colAccidentType].trim() : "기타";
+    const accidentDetail = colAccidentDetail !== -1 && row[colAccidentDetail] ? row[colAccidentDetail].trim() : "";
+    const handlingMethod = colHandlingMethod !== -1 && row[colHandlingMethod] ? row[colHandlingMethod].trim() : "";
+    const producerSettlement = colProducerSettlement !== -1 && row[colProducerSettlement] ? row[colProducerSettlement].trim() : undefined;
+    const channel = colChannel !== -1 && row[colChannel] ? row[colChannel].trim() : undefined;
+    const status = colStatus !== -1 && row[colStatus] ? row[colStatus].trim() : "처리완료";
+
+    let refundAmount: number | undefined;
+    if (colRefundAmount !== -1 && row[colRefundAmount]) {
+      const numericVal = Math.round(parseFloat(row[colRefundAmount].replace(/[^0-9.-]/g, "")));
+      if (!isNaN(numericVal)) refundAmount = numericVal;
+    }
+
+    let courierSettlement: number | undefined;
+    if (colCourierSettlement !== -1 && row[colCourierSettlement]) {
+      const numericVal = Math.round(parseFloat(row[colCourierSettlement].replace(/[^0-9.-]/g, "")));
+      if (!isNaN(numericVal)) courierSettlement = numericVal;
+    }
+
+    let pointRefundAmount: number | undefined;
+    if (colPointRefundAmount !== -1 && row[colPointRefundAmount]) {
+      const numericVal = Math.round(parseFloat(row[colPointRefundAmount].replace(/[^0-9.-]/g, "")));
+      if (!isNaN(numericVal)) pointRefundAmount = numericVal;
+    }
+
+    let accidentScope: number | undefined;
+    if (colAccidentScope !== -1 && row[colAccidentScope]) {
+      const numericVal = parseFloat(row[colAccidentScope].replace(/[^0-9.]/g, ""));
+      if (!isNaN(numericVal)) accidentScope = numericVal;
+    }
+
+    if (refundAmount) totalRefundAmount += refundAmount;
+
+    problemForms.push({
+      id,
+      orderItemRef,
+      receivedDate,
+      accidentType,
+      accidentDetail,
+      handlingMethod,
+      accidentScope,
+      channel,
+      status,
+      refundAmount,
+      producerSettlement,
+      courierSettlement,
+      pointRefundAmount,
+      importChannel
+    });
+  });
+
+  return {
+    problemForms,
+    totalRows: dataRows.length,
+    validCount: problemForms.length,
+    totalRefundAmount,
+    missingCriticalColumns,
+    isLikelyWrongFileType,
+    detectedColumns
+  };
+}
+
+// ============================================================================
+// CS 비용 다운로드 export — 어드민의 별도 "CS 비용 다운로드" 버튼에서 나오는 파일.
+// 컬럼: id, 접수일, 상태, 처리방법, 상품명, 상품 사이즈명, 상품 색상명, 배송타입,
+// 사고 처리 비율 %, CS 비용(원). 주문번호/FK가 없어 메인 계산(OrderItem/ProblemForm 조인)에는
+// 못 쓰고, 기간 합계를 우리 계산 결과와 비교하는 진단(verifyClaimCostAgainstCsExport)에만 쓴다.
+// ============================================================================
+export interface CsCostExportRow {
+  id: string;
+  receivedDate: string; // 접수일 (YYYY.MM.DD, normalizeDateStr 적용)
+  status: string;
+  handlingMethod: string;
+  productName: string;
+  productSizeName?: string;
+  productColorName?: string;
+  deliveryType?: string;
+  accidentHandlingRatio?: number; // 사고 처리 비율(%) — 0~100
+  csCostWon?: number; // CS 비용(원)
+}
+
+export interface CsCostExportParseResult {
+  rows: CsCostExportRow[];
+  totalRows: number;
+  validCount: number;
+  dateRange: { start: string; end: string };
+  totalCsCost: number;
+  missingCriticalColumns: string[];
+  isLikelyWrongFileType: boolean;
+  detectedColumns: string[];
+}
+
+export function parseCSVToCsCostExport(csvText: string): CsCostExportParseResult {
+  const rawRows = parseCSVRows(csvText);
+
+  if (rawRows.length === 0) {
+    return {
+      rows: [], totalRows: 0, validCount: 0, dateRange: { start: "", end: "" }, totalCsCost: 0,
+      missingCriticalColumns: [], isLikelyWrongFileType: false, detectedColumns: []
+    };
+  }
+
+  const headerRow = rawRows[0].map(h => h.toLowerCase());
+
+  const csCostColumnRules: ColumnRule[] = [
+    { key: "id", test: isIdColumn },
+    { key: "receivedDate", test: (col) => col.includes("접수일") },
+    { key: "handlingMethod", test: (col) => col.includes("처리방법") || col.includes("처리 방법") },
+    { key: "productSizeName", test: (col) => col.includes("사이즈명") || col.includes("사이즈") },
+    { key: "productColorName", test: (col) => col.includes("색상명") || col.includes("색상") },
+    { key: "productName", test: (col) => col.includes("상품명") },
+    { key: "deliveryType", test: (col) => col.includes("배송타입") || col.includes("배송 타입") },
+    { key: "accidentRatio", test: (col) => col.includes("사고") && col.includes("비율") },
+    { key: "csCost", test: (col) => col.includes("cs") && col.includes("비용") },
+    { key: "status", test: (col) => col.includes("상태") },
+  ];
+
+  const { indices: csCostCols, hasHeader } = detectColumns(headerRow, csCostColumnRules);
+  let colId = csCostCols.id;
+  let colReceivedDate = csCostCols.receivedDate;
+  let colStatus = csCostCols.status;
+  let colHandlingMethod = csCostCols.handlingMethod;
+  let colProductName = csCostCols.productName;
+  let colProductSizeName = csCostCols.productSizeName;
+  let colProductColorName = csCostCols.productColorName;
+  let colDeliveryType = csCostCols.deliveryType;
+  let colAccidentRatio = csCostCols.accidentRatio;
+  let colCsCost = csCostCols.csCost;
+
+  const { isLikelyWrongFileType, missingCriticalColumns, detectedColumns } = checkSchemaMismatch(hasHeader, csCostCols, [
+    { key: "csCost", label: "CS 비용(원)" },
+    { key: "productName", label: "상품명" },
+  ], rawRows[0]);
+
+  const dataRows = hasHeader ? rawRows.slice(1) : rawRows;
+  const rows: CsCostExportRow[] = [];
+  let totalCsCost = 0;
+  const dates: string[] = [];
+
+  dataRows.forEach((row, idx) => {
+    if (row.length === 0 || (row.length === 1 && !row[0])) return;
+
+    const rowNum = idx + 1;
+    const rawId = colId !== -1 && row[colId] ? row[colId].trim() : "";
+    const id = rawId || `CS-${String(rowNum).padStart(4, "0")}`;
+
+    const receivedDate = colReceivedDate !== -1 && row[colReceivedDate] ? normalizeDateStr(row[colReceivedDate]) : "";
+    const status = colStatus !== -1 && row[colStatus] ? row[colStatus].trim() : "";
+    const handlingMethod = colHandlingMethod !== -1 && row[colHandlingMethod] ? row[colHandlingMethod].trim() : "";
+    const productName = colProductName !== -1 && row[colProductName] ? row[colProductName].trim() : "알 수 없는 상품";
+    const productSizeName = colProductSizeName !== -1 && row[colProductSizeName] ? row[colProductSizeName].trim() : undefined;
+    const productColorName = colProductColorName !== -1 && row[colProductColorName] ? row[colProductColorName].trim() : undefined;
+    const deliveryType = colDeliveryType !== -1 && row[colDeliveryType] ? row[colDeliveryType].trim() : undefined;
+
+    let accidentHandlingRatio: number | undefined;
+    if (colAccidentRatio !== -1 && row[colAccidentRatio]) {
+      const numericVal = parseFloat(row[colAccidentRatio].replace(/[^0-9.]/g, ""));
+      if (!isNaN(numericVal)) accidentHandlingRatio = numericVal;
+    }
+
+    let csCostWon: number | undefined;
+    if (colCsCost !== -1 && row[colCsCost]) {
+      const numericVal = Math.round(parseFloat(row[colCsCost].replace(/[^0-9.-]/g, "")));
+      if (!isNaN(numericVal)) csCostWon = numericVal;
+    }
+
+    if (csCostWon) totalCsCost += csCostWon;
+    if (receivedDate) dates.push(receivedDate);
+
+    rows.push({
+      id,
+      receivedDate,
+      status,
+      handlingMethod,
+      productName,
+      productSizeName,
+      productColorName,
+      deliveryType,
+      accidentHandlingRatio,
+      csCostWon
+    });
+  });
+
+  dates.sort();
+  const dateRange = { start: dates.length > 0 ? dates[0] : "", end: dates.length > 0 ? dates[dates.length - 1] : "" };
+
+  return {
+    rows,
+    totalRows: dataRows.length,
+    validCount: rows.length,
+    dateRange,
+    totalCsCost,
+    missingCriticalColumns,
+    isLikelyWrongFileType,
+    detectedColumns
+  };
+}
+
+export interface ChatRoomParseResult {
+  chatRooms: ChatRoom[];
+  totalRows: number;
+  validCount: number;
+  missingCriticalColumns: string[];
+  isLikelyWrongFileType: boolean;
+  detectedColumns: string[];
+}
+
+// Main ChatRoom(상담/채팅+전화) CSV Parser Function (ARES III `bloom/chatbots/chatroom/` export, 27 columns).
+// 이 CSV는 다른 4개 파서(Review/Incident/OrderItem/ProblemForm)와 달리 사용자가 직접 다운로드해
+// 손으로 편집할 일이 없는 단일 출처 어드민 export라, 공용 유사매칭(alias) 엔진 대신 정확한 컬럼명
+// 정확매칭을 쓴다 — 특히 "매지너 최초 답변 시간"은 어드민 자체의 오탈자라 느슨한 매칭으로 잘못
+// 흡수되면 오히려 위험하다(정확히 이 문자열이어야만 매칭되게 유지).
+export function parseCSVToChatRooms(csvText: string): ChatRoomParseResult {
+  const rawRows = parseCSVRows(csvText);
+
+  if (rawRows.length === 0) {
+    return { chatRooms: [], totalRows: 0, validCount: 0, missingCriticalColumns: [], isLikelyWrongFileType: false, detectedColumns: [] };
+  }
+
+  const headerRow = rawRows[0].map(h => h.trim().toLowerCase());
+
+  const chatRoomColumnRules: ColumnRule[] = [
+    { key: "key", test: (col) => col === "key" },
+    { key: "customerId", test: (col) => col === "고객 id" || col === "고객id" },
+    { key: "customerName", test: (col) => col === "고객 이름" || col === "고객이름" },
+    { key: "userChatStatus", test: (col) => col === "유저챗 상태" },
+    { key: "participatingManagers", test: (col) => col === "참가한 매니저들" },
+    { key: "assignee", test: (col) => col === "담당자" },
+    { key: "consultTags", test: (col) => col === "상담 태그" || col === "상담태그" },
+    { key: "chatOpenedAt", test: (col) => col === "유저챗 처음 오픈된 시간" },
+    { key: "chatClosedAt", test: (col) => col === "유저챗 종료된 시간" },
+    // 어드민 원본 컬럼명 자체의 오탈자("매니저"가 아니라 "매지너") — 그대로 정확매칭해야 한다.
+    { key: "firstManagerReplyAt", test: (col) => col === "매지너 최초 답변 시간" },
+    { key: "chatbotCreatedAt", test: (col) => col === "챗봇 생성 시간" },
+    { key: "managerReplyCount", test: (col) => col === "매니저 답변 횟수" },
+    { key: "operationStatus", test: (col) => col === "운영 상태" },
+    { key: "category", test: (col) => col === "구분" },
+    { key: "phoneStatus", test: (col) => col === "전화 상태" },
+    { key: "callStartedAt", test: (col) => col === "전화 시작 시간" },
+    { key: "callEndedAt", test: (col) => col === "전화 종료 시간" },
+    { key: "missedReason", test: (col) => col === "부재중 이유" },
+    { key: "uid", test: (col) => col === "uid" },
+    { key: "subscribed", test: (col) => col === "정기구독 구독 여부" },
+    { key: "joinedAt", test: (col) => col === "가입일" },
+    { key: "totalPurchaseAmount", test: (col) => col === "총 구매 금액" },
+    { key: "totalPurchaseCount", test: (col) => col === "총 구매 횟수" },
+    { key: "lastAccessedAt", test: (col) => col === "최근 접속일" },
+    { key: "lastPurchasedAt", test: (col) => col === "최근 구매일" },
+    { key: "npsSubmitted", test: (col) => col === "nps 제출 여부" },
+    { key: "directLinkFlag", test: (col) => col === "다이렉트 링크 여부" },
+  ];
+
+  const { indices: crCols, hasHeader } = detectColumns(headerRow, chatRoomColumnRules);
+
+  const { isLikelyWrongFileType, missingCriticalColumns, detectedColumns } = checkSchemaMismatch(hasHeader, crCols, [
+    { key: "category", label: "구분" },
+    { key: "chatbotCreatedAt", label: "챗봇 생성 시간" },
+  ], rawRows[0]);
+
+  const dataRows = hasHeader ? rawRows.slice(1) : rawRows;
+  const chatRooms: ChatRoom[] = [];
+
+  const wrapped = (idx: number, row: string[]): string | undefined => {
+    if (idx === -1 || !row[idx]) return undefined;
+    const v = stripExcelWrapper(row[idx]);
+    return v || undefined;
+  };
+  const plain = (idx: number, row: string[]): string | undefined => {
+    if (idx === -1 || !row[idx]) return undefined;
+    const v = row[idx].trim();
+    return v || undefined;
+  };
+  const numeric = (idx: number, row: string[]): number | undefined => {
+    if (idx === -1 || !row[idx]) return undefined;
+    const n = parseFloat(row[idx].replace(/[^0-9.]/g, ""));
+    return isNaN(n) ? undefined : n;
+  };
+
+  dataRows.forEach((row, idx) => {
+    if (row.length === 0 || (row.length === 1 && !row[0])) return;
+
+    const key = wrapped(crCols.key, row) || `CHAT-${String(idx + 1).padStart(4, "0")}`;
+    const consultTagsRaw = plain(crCols.consultTags, row) || "";
+    const consultTags = consultTagsRaw ? consultTagsRaw.split(",").map(t => t.trim()).filter(Boolean) : [];
+
+    chatRooms.push({
+      key,
+      customerId: plain(crCols.customerId, row),
+      customerName: wrapped(crCols.customerName, row),
+      userChatStatus: plain(crCols.userChatStatus, row),
+      participatingManagers: plain(crCols.participatingManagers, row),
+      assignee: plain(crCols.assignee, row),
+      consultTags,
+      chatOpenedAt: wrapped(crCols.chatOpenedAt, row),
+      chatClosedAt: wrapped(crCols.chatClosedAt, row),
+      firstManagerReplyAt: wrapped(crCols.firstManagerReplyAt, row),
+      chatbotCreatedAt: wrapped(crCols.chatbotCreatedAt, row),
+      managerReplyCount: numeric(crCols.managerReplyCount, row),
+      operationStatus: plain(crCols.operationStatus, row),
+      category: plain(crCols.category, row) || "채팅",
+      phoneStatus: plain(crCols.phoneStatus, row),
+      callStartedAt: wrapped(crCols.callStartedAt, row),
+      callEndedAt: wrapped(crCols.callEndedAt, row),
+      missedReason: plain(crCols.missedReason, row),
+      uid: plain(crCols.uid, row),
+      subscribed: plain(crCols.subscribed, row),
+      joinedAt: wrapped(crCols.joinedAt, row),
+      totalPurchaseAmount: numeric(crCols.totalPurchaseAmount, row),
+      totalPurchaseCount: numeric(crCols.totalPurchaseCount, row),
+      lastAccessedAt: wrapped(crCols.lastAccessedAt, row),
+      lastPurchasedAt: wrapped(crCols.lastPurchasedAt, row),
+      npsSubmitted: plain(crCols.npsSubmitted, row),
+      directLinkFlag: plain(crCols.directLinkFlag, row),
+    });
+  });
+
+  return {
+    chatRooms,
+    totalRows: dataRows.length,
+    validCount: chatRooms.length,
+    missingCriticalColumns,
+    isLikelyWrongFileType,
+    detectedColumns
+  };
+}
+
+// ============================================================================
+// Part E — 발송불가율(SCM VOC) CSV 파서
+//
+// 다른 5개 파서와 달리 이 CSV는 이미 SQL 단(디비버로 직접 실행한 쿼리)에서 주/월별로 집계까지
+// 끝난 형태(receipt_week 또는 receipt_month, total_qty, dispatch_failed_qty, dispatch_failure_rate)라,
+// row-level 원본을 다시 계산할 필요가 없다 — 그대로 파싱해서 차트에 꽂으면 된다. 그래서 별도
+// "엔진" 파일 없이 여기 파서 하나로 충분하다. 컬럼명은 사용자가 직접 짠 고정 쿼리의 별칭이라
+// 어드민 export처럼 이름이 들쭉날쭉할 위험이 없으므로, 다른 파서들의 유사매칭 대신 정확매칭을 쓴다.
+// ============================================================================
+
+export interface DispatchFailureRow {
+  period: string; // granularity="weekly"면 "IYYY-IW"(예: "2026-05"), "monthly"면 "YYYY-MM"
+  totalQty: number;
+  dispatchFailedQty: number;
+  dispatchFailureRate: number; // 0~1 비율(퍼센트 아님) — SQL의 ROUND(...,4) 결과 그대로
+}
+
+export interface DispatchFailureParseResult {
+  rows: DispatchFailureRow[];
+  totalRows: number;
+  validCount: number;
+  missingCriticalColumns: string[];
+  isLikelyWrongFileType: boolean;
+  detectedColumns: string[];
+}
+
+export function parseCSVToDispatchFailure(csvText: string, granularity: "weekly" | "monthly"): DispatchFailureParseResult {
+  const rawRows = parseCSVRows(csvText);
+
+  if (rawRows.length === 0) {
+    return { rows: [], totalRows: 0, validCount: 0, missingCriticalColumns: [], isLikelyWrongFileType: false, detectedColumns: [] };
+  }
+
+  const headerRow = rawRows[0].map(h => h.trim().toLowerCase());
+  const periodColName = granularity === "weekly" ? "receipt_week" : "receipt_month";
+  const periodLabel = granularity === "weekly" ? "receipt_week" : "receipt_month";
+
+  const dispatchFailureColumnRules: ColumnRule[] = [
+    { key: "period", test: (col) => col === periodColName },
+    { key: "totalQty", test: (col) => col === "total_qty" },
+    { key: "dispatchFailedQty", test: (col) => col === "dispatch_failed_qty" },
+    { key: "dispatchFailureRate", test: (col) => col === "dispatch_failure_rate" },
+  ];
+
+  const { indices: dfCols, hasHeader } = detectColumns(headerRow, dispatchFailureColumnRules);
+  const colPeriod = dfCols.period;
+  const colTotalQty = dfCols.totalQty;
+  const colFailedQty = dfCols.dispatchFailedQty;
+  const colRate = dfCols.dispatchFailureRate;
+
+  const { isLikelyWrongFileType, missingCriticalColumns, detectedColumns } = checkSchemaMismatch(hasHeader, dfCols, [
+    { key: "period", label: periodLabel },
+    { key: "totalQty", label: "total_qty" },
+    { key: "dispatchFailedQty", label: "dispatch_failed_qty" },
+  ], rawRows[0]);
+
+  const dataRows = hasHeader ? rawRows.slice(1) : rawRows;
+  const rows: DispatchFailureRow[] = [];
+
+  dataRows.forEach(row => {
+    if (row.length === 0 || (row.length === 1 && !row[0])) return;
+
+    const period = colPeriod !== -1 && row[colPeriod] ? row[colPeriod].trim() : "";
+    if (!period) return;
+
+    const totalQty = colTotalQty !== -1 && row[colTotalQty] ? Math.round(parseFloat(row[colTotalQty].replace(/[^0-9.-]/g, ""))) : NaN;
+    const dispatchFailedQty = colFailedQty !== -1 && row[colFailedQty] ? Math.round(parseFloat(row[colFailedQty].replace(/[^0-9.-]/g, ""))) : NaN;
+    if (isNaN(totalQty) || isNaN(dispatchFailedQty)) return;
+
+    // dispatch_failure_rate은 SQL이 이미 계산해서 내려주지만, 혹시 컬럼이 없거나 비어있으면
+    // total_qty/dispatch_failed_qty로부터 안전하게(0으로 나누지 않도록) 재계산한다.
+    const rawRate = colRate !== -1 && row[colRate] ? parseFloat(row[colRate]) : NaN;
+    const dispatchFailureRate = !isNaN(rawRate) ? rawRate : (totalQty > 0 ? dispatchFailedQty / totalQty : 0);
+
+    rows.push({ period, totalQty, dispatchFailedQty, dispatchFailureRate });
+  });
+
+  rows.sort((a, b) => a.period.localeCompare(b.period));
+
+  return {
+    rows,
+    totalRows: dataRows.length,
+    validCount: rows.length,
+    missingCriticalColumns,
+    isLikelyWrongFileType,
+    detectedColumns
   };
 }

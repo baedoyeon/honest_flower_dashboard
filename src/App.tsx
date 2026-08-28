@@ -5,7 +5,10 @@ import ProductStatusTab from "./components/ProductStatusTab";
 import AccidentIncidentsTab from "./components/AccidentIncidentsTab";
 import VOCAnaTab from "./components/VOCAnaTab";
 import ReviewArchiveTab from "./components/ReviewArchiveTab";
-import { BarChart2, Sprout, ShieldAlert, PieChart, Archive, Sparkles, Building2, Calendar } from "lucide-react";
+import ClaimCostTab from "./components/ClaimCostTab";
+import ActionBoardTab from "./components/ActionBoardTab";
+import ChatResponseTab from "./components/ChatResponseTab";
+import { BarChart2, Sprout, ShieldAlert, PieChart, Archive, Sparkles, Building2, Calendar, Wallet, ListChecks, Headphones } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { ReviewsProvider, useReviews } from "./context/ReviewsContext";
 
@@ -18,20 +21,34 @@ export default function App() {
 }
 
 function AppContent() {
-  const { weekFilter, setWeekFilter, weekRanges, activeTab, setActiveTab } = useReviews();
+  const { weekFilter, setWeekFilter, weekRanges, activeTab, setActiveTab, isLoading } = useReviews();
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-slate-50/50 flex items-center justify-center">
+        <div className="flex flex-col items-center gap-3 text-slate-400">
+          <div className="h-8 w-8 rounded-full border-2 border-slate-200 border-t-brand-green animate-spin" />
+          <p className="text-xs font-bold">데이터 불러오는 중...</p>
+        </div>
+      </div>
+    );
+  }
 
   const tabs = [
     { id: "metrics", label: "주간 핵심 지표", icon: <BarChart2 className="h-4 w-4" /> },
     { id: "products", label: "상품별 현황", icon: <Sprout className="h-4 w-4" /> },
     { id: "incidents", label: "사고접수", icon: <ShieldAlert className="h-4 w-4" /> },
+    { id: "actionboard", label: "처리 필요", icon: <ListChecks className="h-4 w-4" /> },
+    { id: "csresponse", label: "CS 응대 현황", icon: <Headphones className="h-4 w-4" /> },
     { id: "voc", label: "VOC 카테고리 분석", icon: <PieChart className="h-4 w-4" /> },
+    { id: "claimcost", label: "매출/클레임비용", icon: <Wallet className="h-4 w-4" /> },
     { id: "archive", label: "원본 후기 아카이브", icon: <Archive className="h-4 w-4" /> },
   ] as const;
 
   const filterOptions = [
     { id: "this", label: weekRanges.thisWeek.label },
     { id: "last", label: weekRanges.lastWeek.label },
-    { id: "all", label: "전체 기간 (전체 데이터)" },
+    { id: "all", label: weekRanges.allPeriod.label },
   ] as const;
 
   return (
@@ -105,7 +122,10 @@ function AppContent() {
               {activeTab === "metrics" && <WeeklyMetricsTab />}
               {activeTab === "products" && <ProductStatusTab />}
               {activeTab === "incidents" && <AccidentIncidentsTab />}
+              {activeTab === "actionboard" && <ActionBoardTab />}
+              {activeTab === "csresponse" && <ChatResponseTab />}
               {activeTab === "voc" && <VOCAnaTab />}
+              {activeTab === "claimcost" && <ClaimCostTab />}
               {activeTab === "archive" && <ReviewArchiveTab />}
             </div>
           </AnimatePresence>
