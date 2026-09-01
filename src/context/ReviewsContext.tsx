@@ -4,10 +4,24 @@ import { Incident, initialIncidentsData } from "../data/initialIncidents";
 import { OrderItem, initialOrderItemsData } from "../data/orderItems";
 import { ProblemForm, initialProblemFormsData } from "../data/problemForms";
 import { ChatRoom, initialChatRoomsData } from "../data/chatRooms";
-import { CsCostExportRow, DispatchFailureRow } from "../utils/csvParser";
+import { CsCostExportRow, DispatchFailureRow, classifyCategory, getDepartmentForCategory } from "../utils/csvParser";
 import { defaultCompanyHolidays } from "../data/companyHolidays";
 import { idbLoad, idbSave } from "../utils/idbStorage";
 import { DEFAULT_MONTHLY_CS_LABOR_COST_ALLOCATION_KRW } from "../utils/chatRoomEngine";
+
+// ActionBoardTab("처리 필요" 탭)과 상단 탭 배지가 함께 쓰는 항목 타입.
+export interface ActionItem {
+  key: string;
+  type: "review" | "incident";
+  product: string;
+  customer: string;
+  date: string;
+  summary: string;
+  department: string;
+  targetId: string;
+  adminLink?: string;
+  importChannel?: "일반" | "플라워고";
+}
 
 interface ReviewsContextType {
   reviews: Review[];
@@ -19,6 +33,12 @@ interface ReviewsContextType {
   // (OrderItem 조인 불필요 — CSV 자체에 상품명이 이미 들어있음). ProblemForm 데이터가 하나도
   // 없을 때만(하위호환) 옛 Incident 모델로 폴백한다.
   weeklyAccidentCountsByProduct: Record<string, number>;
+  // "처리 필요" 탭(ActionBoardTab)과 상단 탭 배지가 공유하는 대기열. 사고접수는 ProblemForm의
+  // status가 "접수중"인 것만(처리완료/반려됨/최종반려됨이 되면 재계산 시 자동으로 목록에서 빠짐 —
+  // 수동 처리 버튼 없음), 리뷰는 비추천/저평점이면서 exposed===true인 것만(exposed가 꺼지면 자동
+  // 이탈, 애매한 경우를 위한 수동 오버라이드만 남겨둠).
+  actionItems: ActionItem[];
+  resolveActionItem: (key: string) => void;
   orderItems: OrderItem[];
   importOrderItems: (newItems: OrderItem[], replace?: boolean) => Promise<void>;
   problemForms: ProblemForm[];
@@ -103,6 +123,9 @@ const COMPANY_HOLIDAYS_STORAGE_KEY = "honestflower_companyHolidays";
 const MONTHLY_CS_LABOR_COST_ALLOCATION_STORAGE_KEY = "honestflower_monthlyCsLaborCostAllocation";
 const DISPATCH_FAILURE_WEEKLY_STORAGE_KEY = "honestflower_dispatchFailureWeekly";
 const DISPATCH_FAILURE_MONTHLY_STORAGE_KEY = "honestflower_dispatchFailureMonthly";
+// "처리완료로 표시" 수동 오버라이드(리뷰 대상)는 원본 데이터를 건드리지 않고 이 id 집합으로만
+// 관리한다 — CSV를 다시 업로드해도(원본 배열이 통째로 교체돼도) 표시가 사라지지 않게 하기 위함.
+const RESOLVED_ACTION_IDS_STORAGE_KEY = "honestflower_resolvedActionIds";
 
 function loadFromLocalStorage<T>(key: string, fallback: T): T {
   try {
@@ -376,7 +399,8 @@ export function ReviewsProvider({ children }: { children: React.ReactNode }) {
   const [monthlyCsLaborCostAllocation, setMonthlyCsLaborCostAllocation] = useState<number>(() => loadFromLocalStorage(MONTHLY_CS_LABOR_COST_ALLOCATION_STORAGE_KEY, DEFAULT_MONTHLY_CS_LABOR_COST_ALLOCATION_KRW));
   const [dispatchFailureWeekly, setDispatchFailureWeekly] = useState<DispatchFailureRow[]>(() => loadFromLocalStorage(DISPATCH_FAILURE_WEEKLY_STORAGE_KEY, []));
   const [dispatchFailureMonthly, setDispatchFailureMonthly] = useState<DispatchFailureRow[]>(() => loadFromLocalStorage(DISPATCH_FAILURE_MONTHLY_STORAGE_KEY, []));
-  
+  const [resolvedActionIds, setResolvedActionIds] = useState<Set<string>>(() => new Set(loadFromLocalStorage<string[]>(RESOLVED_ACTION_IDS_STORAGE_KEY, [])));
+
   // Dynamically compute deduplicated and image-merged reviews list for all metrics and components
   const reviews = useMemo(() => getDeduplicatedReviews(rawReviews), [rawReviews]);
 
@@ -511,6 +535,10 @@ export function ReviewsProvider({ children }: { children: React.ReactNode }) {
   }, [dispatchFailureMonthly]);
 
   useEffect(() => {
+    saveToLocalStorage(RESOLVED_ACTION_IDS_STORAGE_KEY, Array.from(resolvedActionIds));
+  }, [resolvedActionIds]);
+
+  useEffect(() => {
     if (!hasLoadedPersistedData) return;
     idbSave(INCIDENTS_STORAGE_KEY, rawIncidents);
   }, [rawIncidents, hasLoadedPersistedData]);
@@ -612,6 +640,63 @@ export function ReviewsProvider({ children }: { children: React.ReactNode }) {
     // Sort by totalCount descending by default
     return statsList.sort((a, b) => b.totalCount - a.totalCount);
   }, [weeklyReviews, weeklyAccidentCountsByProduct]);
+
+  // "처리 필요" 탭 + 상단 탭 배지가 공유하는 대기열. 주간 필터와 무관하게 전체 기간 기준(지금 당장
+  // 처리해야 할 건이 하필 저번주 필터에 가려서 안 보이면 안 되므로) reviews/problemForms 전체를 본다.
+  // 사고접수는 ProblemForm 기준(status==="접수중"만) — 처리완료/반려됨/최종반려됨이 되면 다음
+  // 재계산 때 자동으로 목록에서 빠진다(수동 처리 버튼 없음, 상태값이 유일한 소스).
+  const actionItems = useMemo(() => {
+    const list: ActionItem[] = [];
+
+    problemForms.forEach(pf => {
+      if (pf.status !== "접수중") return;
+      const category = classifyCategory(pf.accidentDetail || pf.accidentType || "", 0, undefined);
+      list.push({
+        key: `incident-${pf.id}`,
+        type: "incident",
+        product: (pf.productName || "").split("/")[0].trim() || "(상품명 없음)",
+        customer: getMaskedName(Number(pf.id.replace(/\D/g, "")) || 0, pf.customerName),
+        date: pf.receivedDate || "",
+        summary: pf.accidentDetail || pf.accidentType || "사고접수 내용 없음",
+        department: getDepartmentForCategory(category),
+        targetId: pf.id,
+        adminLink: pf.orderItemRef ? `https://admin.honestflower.kr/orders/${pf.orderItemRef}` : undefined,
+        importChannel: pf.importChannel,
+      });
+    });
+
+    // 리뷰는 exposed===false가 되면(어드민이 이미 확인/조치한 것으로 간주) 자동으로 대기열에서
+    // 빠진다. "답변 달았는지" 자체는 CSV로 안 들어오는 정보라(관리자 답변은 ARES 어드민의 별도
+    // ReviewComment 모델이라 export에 없음) exposed 하나로만 판단하고, 애매한 경우를 위해
+    // resolvedActionIds 수동 오버라이드만 남겨둔다.
+    reviews.forEach(r => {
+      const isNegative = r.type === "비추천" || (r.rating > 0 && r.rating <= 2);
+      if (!isNegative) return;
+      if (r.exposed !== true) return;
+      const key = `review-${r.id}`;
+      if (resolvedActionIds.has(key)) return;
+      list.push({
+        key,
+        type: "review",
+        product: r.product,
+        customer: r.reviewer || getMaskedName(r.id, r.rawReviewer),
+        date: r.date,
+        summary: r.review || "",
+        department: getDepartmentForCategory(r.category),
+        targetId: String(r.id),
+      });
+    });
+
+    return list.sort((a, b) => b.date.localeCompare(a.date));
+  }, [reviews, problemForms, resolvedActionIds]);
+
+  const resolveActionItem = (key: string) => {
+    setResolvedActionIds(prev => {
+      const next = new Set(prev);
+      next.add(key);
+      return next;
+    });
+  };
 
   // 현재 주간 대시보드에 활성화(archived !== true)된 리뷰를 전부 archived로 표시해 주간 집계를 비운다.
   // 로컬 상태(IndexedDB에 저장됨)만 변경 — Firestore/서버 DB 연동 아님([[no-dashboard-db]] 방침).
@@ -912,6 +997,8 @@ export function ReviewsProvider({ children }: { children: React.ReactNode }) {
       incidents,
       weeklyIncidents,
       weeklyAccidentCountsByProduct,
+      actionItems,
+      resolveActionItem,
       orderItems,
       importOrderItems,
       problemForms,

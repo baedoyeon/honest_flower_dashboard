@@ -21,7 +21,7 @@ export default function App() {
 }
 
 function AppContent() {
-  const { weekFilter, setWeekFilter, weekRanges, activeTab, setActiveTab, isLoading } = useReviews();
+  const { weekFilter, setWeekFilter, weekRanges, activeTab, setActiveTab, isLoading, actionItems } = useReviews();
 
   if (isLoading) {
     return (
@@ -110,6 +110,11 @@ function AppContent() {
                 )}
                 {tab.icon}
                 <span>{tab.label}</span>
+                {tab.id === "actionboard" && actionItems.length > 0 && (
+                  <span className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-rose-600 text-white text-[10px] font-black leading-none">
+                    {actionItems.length}
+                  </span>
+                )}
               </button>
             );
           })}

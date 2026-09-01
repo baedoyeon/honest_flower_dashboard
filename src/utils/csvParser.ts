@@ -1147,6 +1147,7 @@ export function parseCSVToProblemForms(csvText: string, importChannel: "일반" 
     },
     { key: "orderItemRef", guard: (hasExisting) => !hasExisting, test: (col) => col.includes("상품주문번호") || col.includes("상품 주문번호") },
     { key: "productName", test: (col) => col.includes("상품명") },
+    { key: "customerName", test: isReviewerNameColumn },
     { key: "receivedDate", test: (col) => col === "접수시간" || (col.includes("접수시간") && !col.includes("재접수")) },
     { key: "accidentType", test: isAccidentTypeColumn },
     { key: "accidentDetail", test: isAccidentDetailColumn },
@@ -1171,6 +1172,7 @@ export function parseCSVToProblemForms(csvText: string, importChannel: "일반" 
   let colId = pfCols.id;
   let colOrderItemRef = pfCols.orderItemRef;
   let colProductName = pfCols.productName;
+  let colCustomerName = pfCols.customerName;
   let colReceivedDate = pfCols.receivedDate;
   let colAccidentType = pfCols.accidentType;
   let colAccidentDetail = pfCols.accidentDetail;
@@ -1210,6 +1212,7 @@ export function parseCSVToProblemForms(csvText: string, importChannel: "일반" 
     if (!orderItemRef) return; // FK 없는 행은 클레임코스트 계산에 쓸 수 없으므로 스킵
 
     const productName = colProductName !== -1 && row[colProductName] ? row[colProductName].trim() : undefined;
+    const customerName = colCustomerName !== -1 && row[colCustomerName] ? row[colCustomerName].trim() : undefined;
     const receivedDate = colReceivedDate !== -1 && row[colReceivedDate] ? normalizeDateStr(row[colReceivedDate]) : undefined;
     const accidentType = colAccidentType !== -1 && row[colAccidentType] ? row[colAccidentType].trim() : "기타";
     const accidentDetail = colAccidentDetail !== -1 && row[colAccidentDetail] ? row[colAccidentDetail].trim() : "";
@@ -1248,6 +1251,7 @@ export function parseCSVToProblemForms(csvText: string, importChannel: "일반" 
       id,
       orderItemRef,
       productName,
+      customerName,
       receivedDate,
       accidentType,
       accidentDetail,
