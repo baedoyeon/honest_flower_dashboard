@@ -14,6 +14,11 @@ interface ReviewsContextType {
   weeklyReviews: Review[];
   incidents: Incident[];
   weeklyIncidents: Incident[];
+  // 상품별 "선택 기간 내 처리완료된 사고접수" 건수 — ProblemForm의 자체 "상품명" 컬럼(예:
+  // "플라워 럭키박스/6종 이상/랜덤혼합(fFLrd3sst-SF)")을 첫 "/" 앞 기준으로 정규화해 집계한다
+  // (OrderItem 조인 불필요 — CSV 자체에 상품명이 이미 들어있음). ProblemForm 데이터가 하나도
+  // 없을 때만(하위호환) 옛 Incident 모델로 폴백한다.
+  weeklyAccidentCountsByProduct: Record<string, number>;
   orderItems: OrderItem[];
   importOrderItems: (newItems: OrderItem[], replace?: boolean) => Promise<void>;
   problemForms: ProblemForm[];
@@ -394,40 +399,40 @@ export function ReviewsProvider({ children }: { children: React.ReactNode }) {
     const anchor = getKSTDate();
 
     const day = anchor.getDay(); // 0 is Sun, 1 is Mon, ..., 5 is Fri, 6 is Sat
-    
-    // Calculate difference to Saturday of the current reporting cycle (Saturday ~ Friday)
-    const diffToSaturday = day === 6 ? 0 : -(day + 1);
-    
-    const thisWeekSat = new Date(anchor);
-    thisWeekSat.setDate(anchor.getDate() + diffToSaturday);
-    thisWeekSat.setHours(0, 0, 0, 0);
-    
-    const thisWeekFri = new Date(thisWeekSat);
-    thisWeekFri.setDate(thisWeekSat.getDate() + 6);
-    thisWeekFri.setHours(23, 59, 59, 999);
-    
-    const lastWeekSat = new Date(thisWeekSat);
-    lastWeekSat.setDate(thisWeekSat.getDate() - 7);
-    
-    const lastWeekFri = new Date(lastWeekSat);
-    lastWeekFri.setDate(lastWeekSat.getDate() + 6);
-    
+
+    // Calculate difference to Monday of the current reporting cycle (Monday ~ Sunday)
+    const diffToMonday = day === 0 ? -6 : -(day - 1);
+
+    const thisWeekMon = new Date(anchor);
+    thisWeekMon.setDate(anchor.getDate() + diffToMonday);
+    thisWeekMon.setHours(0, 0, 0, 0);
+
+    const thisWeekSun = new Date(thisWeekMon);
+    thisWeekSun.setDate(thisWeekMon.getDate() + 6);
+    thisWeekSun.setHours(23, 59, 59, 999);
+
+    const lastWeekMon = new Date(thisWeekMon);
+    lastWeekMon.setDate(thisWeekMon.getDate() - 7);
+
+    const lastWeekSun = new Date(lastWeekMon);
+    lastWeekSun.setDate(lastWeekMon.getDate() + 6);
+
     return {
       thisWeek: {
-        start: formatKSTDate(thisWeekSat),
-        end: formatKSTDate(thisWeekFri),
-        label: `이번주 (${formatKSTDate(thisWeekSat).slice(5)} ~ ${formatKSTDate(thisWeekFri).slice(5)})`
+        start: formatKSTDate(thisWeekMon),
+        end: formatKSTDate(thisWeekSun),
+        label: `이번주 (${formatKSTDate(thisWeekMon).slice(5)} ~ ${formatKSTDate(thisWeekSun).slice(5)})`
       },
       lastWeek: {
-        start: formatKSTDate(lastWeekSat),
-        end: formatKSTDate(lastWeekFri),
-        label: `저번주 (${formatKSTDate(lastWeekSat).slice(5)} ~ ${formatKSTDate(lastWeekFri).slice(5)})`
+        start: formatKSTDate(lastWeekMon),
+        end: formatKSTDate(lastWeekSun),
+        label: `저번주 (${formatKSTDate(lastWeekMon).slice(5)} ~ ${formatKSTDate(lastWeekSun).slice(5)})`
       },
       // "전체기간"은 업로드된 전체 데이터가 아니라 이번주+저번주 2주 합산으로 정의된다.
       allPeriod: {
-        start: formatKSTDate(lastWeekSat),
-        end: formatKSTDate(thisWeekFri),
-        label: `전체 기간 (${formatKSTDate(lastWeekSat).slice(5)} ~ ${formatKSTDate(thisWeekFri).slice(5)})`
+        start: formatKSTDate(lastWeekMon),
+        end: formatKSTDate(thisWeekSun),
+        label: `전체 기간 (${formatKSTDate(lastWeekMon).slice(5)} ~ ${formatKSTDate(thisWeekSun).slice(5)})`
       }
     };
   }, [reviews, incidents]);
@@ -529,6 +534,29 @@ export function ReviewsProvider({ children }: { children: React.ReactNode }) {
     return incidents.filter(i => i.date >= range.start && i.date <= range.end);
   }, [incidents, weekFilter, weekRanges]);
 
+  // ProblemForm 기반 상품별 사고접수 건수(선택 기간, 상태 무관 전체 접수 건수 기준 — 반려/접수중
+  // 포함) — Incident 모델보다 실제로 상시 업로드되는 최신 데이터라 이걸 우선 쓴다. ProblemForm이
+  // 하나도 없을 때만 옛 Incident로 폴백.
+  const weeklyAccidentCountsByProduct = useMemo(() => {
+    const range = weekFilter === "this" ? weekRanges.thisWeek : weekFilter === "last" ? weekRanges.lastWeek : weekRanges.allPeriod;
+    const counts: Record<string, number> = {};
+
+    if (problemForms.length > 0) {
+      problemForms.forEach(pf => {
+        if (!pf.receivedDate || pf.receivedDate < range.start || pf.receivedDate > range.end) return;
+        const base = (pf.productName || "").split("/")[0].trim();
+        if (!base) return;
+        counts[base] = (counts[base] || 0) + 1;
+      });
+      return counts;
+    }
+
+    weeklyIncidents.forEach(inc => {
+      counts[inc.product] = (counts[inc.product] || 0) + 1;
+    });
+    return counts;
+  }, [problemForms, weeklyIncidents, weekFilter, weekRanges]);
+
   // Compute product statistics dynamically from active weeklyReviews & weeklyIncidents!
   const productStats = useMemo(() => {
     const map = new Map<string, {
@@ -556,14 +584,13 @@ export function ReviewsProvider({ children }: { children: React.ReactNode }) {
       else if (r.type === "비추천") val.notRecommend++;
     });
 
-    // Count incidents per product from independent weeklyIncidents data
-    weeklyIncidents.forEach(inc => {
-      if (inc.incidentStatus === "처리완료") {
-        if (!map.has(inc.product)) {
-          map.set(inc.product, { totalCount: 0, ratedCount: 0, sumRating: 0, recommend: 0, neutral: 0, notRecommend: 0, accidentCount: 0 });
-        }
-        map.get(inc.product)!.accidentCount++;
+    // Count accidents per product from ProblemForm(선호)/Incident(폴백) — 리뷰가 없는 상품도
+    // 누락되지 않도록 map에 없으면 새로 시드한다.
+    Object.entries(weeklyAccidentCountsByProduct).forEach(([product, count]) => {
+      if (!map.has(product)) {
+        map.set(product, { totalCount: 0, ratedCount: 0, sumRating: 0, recommend: 0, neutral: 0, notRecommend: 0, accidentCount: 0 });
       }
+      map.get(product)!.accidentCount += count;
     });
 
     const statsList: ProductStat[] = [];
@@ -584,7 +611,7 @@ export function ReviewsProvider({ children }: { children: React.ReactNode }) {
 
     // Sort by totalCount descending by default
     return statsList.sort((a, b) => b.totalCount - a.totalCount);
-  }, [weeklyReviews, weeklyIncidents]);
+  }, [weeklyReviews, weeklyAccidentCountsByProduct]);
 
   // 현재 주간 대시보드에 활성화(archived !== true)된 리뷰를 전부 archived로 표시해 주간 집계를 비운다.
   // 로컬 상태(IndexedDB에 저장됨)만 변경 — Firestore/서버 DB 연동 아님([[no-dashboard-db]] 방침).
@@ -823,8 +850,12 @@ export function ReviewsProvider({ children }: { children: React.ReactNode }) {
           if (existingMap.has(incoming.id)) {
             const existing = existingMap.get(incoming.id)!;
             if (incoming.product === existing.product && incoming.date === existing.date) {
-              // 업로드하는 CSV는 항상 최신 정답 데이터이므로 핵심 필드는 전부 새 값으로 덮어쓴다.
-              // CSV엔 없지만 다른 경로로 이미 붙어있던 보강 정보(사고접수 처리결과 등)는 새 값이 없을 때만 보존한다.
+              // 업로드하는 CSV는 항상 최신 정답 데이터이므로 핵심 필드(rating/type 포함)는 전부 새
+              // 값으로 덮어쓴다. CSV엔 없지만 다른 경로로 이미 붙어있던 보강 정보(사고접수 처리결과
+              // 등)는 새 값이 없을 때만 보존한다. 사고접수 확정 여부는 incidentStatus 뱃지로 별도
+              // 표시할 뿐 rating/type을 강제로 덮어쓰지 않는다 — 한 번 사고접수로 확정된 리뷰 ID가
+              // 이후 완전히 다른(좋은) 내용으로 재업로드돼도 영원히 1점/비추천에 고정되는 버그가
+              // 있었다(신규 CSV의 rating/type이 위 스프레드로 이미 반영됐는데 아래서 다시 덮어썼음).
               const merged: Review = {
                 ...existing,
                 ...incoming,
@@ -836,10 +867,6 @@ export function ReviewsProvider({ children }: { children: React.ReactNode }) {
                   ? Array.from(new Set([...(existing.image_urls || (existing.image_url ? [existing.image_url] : [])), incoming.image_url]))
                   : (existing.image_urls || (existing.image_url ? [existing.image_url] : [])),
               };
-              if (merged.incidentStatus === "처리완료") {
-                merged.type = "비추천";
-                merged.rating = 1;
-              }
               existingMap.set(incoming.id, merged);
             } else {
               // Conflicting ID from a new CSV (e.g. new CSV starting with ID 1 but totally different review)
@@ -884,6 +911,7 @@ export function ReviewsProvider({ children }: { children: React.ReactNode }) {
       weeklyReviews,
       incidents,
       weeklyIncidents,
+      weeklyAccidentCountsByProduct,
       orderItems,
       importOrderItems,
       problemForms,

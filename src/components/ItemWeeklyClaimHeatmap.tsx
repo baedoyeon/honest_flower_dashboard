@@ -72,7 +72,7 @@ export default function ItemWeeklyClaimHeatmap({
             <h3 className="text-sm font-bold text-slate-900">상품 × 주차 클레임 히트맵</h3>
             <p className="text-[11px] text-slate-400 mt-0.5">
               특정 상품의 클레임이 최근 몇 주 사이 튀었는지, 원래 꾸준했는지 한눈에 파악. 클레임건수 상위{" "}
-              {Math.min(rows.length, DEFAULT_TOP_N)}개 상품 기본 표시 · 결제일 기준 토요일 시작 주차.
+              {Math.min(rows.length, DEFAULT_TOP_N)}개 상품 기본 표시 · 결제일 기준 월요일 시작 주차.
             </p>
           </div>
         </div>

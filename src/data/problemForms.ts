@@ -3,6 +3,7 @@
 export interface ProblemForm {
   id: string;
   orderItemRef: string; // FK — OrderItem.orderNumber와 매칭. 실제 export 헤더는 "주문번호"(옛 목업 스키마의 "주문 아이템" 아님)
+  productName?: string; // CSV 자체의 "상품명" 컬럼 — OrderItem 조인 없이 상품별 집계(요주의 상품 등)에 바로 쓸 수 있다
   receivedDate?: string; // "접수시간"의 날짜 부분(YYYY.MM.DD) — 시각은 버림. 라이프사이클 전체는 Phase 2.3에서 다룸
   accidentType: string; // 사고 유형: 상품 누락 / 상품 오배송 / 품질 이상 / 기타
   accidentDetail: string; // 상세 유형

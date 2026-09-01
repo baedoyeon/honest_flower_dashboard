@@ -474,13 +474,13 @@ export function computeProductClaimStats(orderItems: OrderItem[], problemForms: 
 
 // ============================================================================
 // 상품 × 주차 클레임 히트맵 — 구글시트 Y26_claim dashboard의 item_pivot 탭(상품×주차 건수/비율
-// 크로스탭 2개)을 대시보드로 옮긴 것. 주차는 대시보드 상단 필터와 동일한 "토요일 시작" 기준.
+// 크로스탭 2개)을 대시보드로 옮긴 것. 주차는 대시보드 상단 필터와 동일한 "월요일 시작" 기준.
 // ============================================================================
 
 export interface ItemWeeklyClaimCell {
-  weekStart: string; // "YYYY.MM.DD" (토요일)
-  weekEnd: string; // "YYYY.MM.DD" (금요일)
-  weekLabel: string; // "2026년 33주차 (08.10~08.16)" — 대시보드 자체 토요일 기준 주차 번호(ISO 8601 아님)
+  weekStart: string; // "YYYY.MM.DD" (월요일)
+  weekEnd: string; // "YYYY.MM.DD" (일요일)
+  weekLabel: string; // "2026년 33주차 (08.10~08.16)" — 대시보드 자체 월요일 기준 주차 번호(ISO 8601 아님)
   count: number;
   shareOfWeekTotal: number; // 0~100(%). 그 주차 전체 클레임건수가 0이면 0.
 }
@@ -491,11 +491,11 @@ export interface ItemWeeklyClaimRow {
   weeks: ItemWeeklyClaimCell[]; // weekStarts와 동일한 순서(오름차순)로 상품마다 전체 주차 채움(0 포함)
 }
 
-// 대시보드의 "토요일 시작" 주차 정의와 통일 — ReviewsContext.tsx의 weekRanges 계산과 동일한 산식
-// (day===6(토요일)이면 그날, 아니면 (day+1)%7일 전 토요일로 귀속).
-function saturdayWeekStart(d: Date): Date {
+// 대시보드의 "월요일 시작" 주차 정의와 통일 — ReviewsContext.tsx의 weekRanges 계산과 동일한 산식
+// (day===1(월요일)이면 그날, 아니면 (day+6)%7일 전 월요일로 귀속).
+function mondayWeekStart(d: Date): Date {
   const day = d.getDay();
-  const offset = (day + 1) % 7;
+  const offset = (day + 6) % 7;
   const start = new Date(d);
   start.setDate(d.getDate() - offset);
   start.setHours(0, 0, 0, 0);
@@ -506,12 +506,12 @@ function formatYmd(d: Date): string {
   return `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, "0")}.${String(d.getDate()).padStart(2, "0")}`;
 }
 
-// 그 해 1월 1일이 속한 토요일-시작 주를 1주차로 삼는 대시보드 자체 주차 번호 — ISO 8601 주차와는
-// 다르다(ISO는 월요일 시작 + 목요일 포함 규칙). 상단 필터와 같은 토요일 기준을 유지하는 게 이 안에서의
-// 일관성이 우선이라 이렇게 정의했다.
+// 그 해 1월 1일이 속한 월요일-시작 주를 1주차로 삼는 대시보드 자체 주차 번호 — ISO 8601과는
+// 연도 경계 처리(ISO의 "목요일 포함" 규칙)가 다르다. 상단 필터와 같은 월요일 기준을 유지하는 게
+// 이 안에서의 일관성이 우선이라 이렇게 정의했다.
 function weekOfYearLabel(weekStart: Date): string {
   const year = weekStart.getFullYear();
-  const jan1WeekStart = saturdayWeekStart(new Date(year, 0, 1));
+  const jan1WeekStart = mondayWeekStart(new Date(year, 0, 1));
   const diffDays = Math.round((weekStart.getTime() - jan1WeekStart.getTime()) / 86400000);
   const weekNum = Math.floor(diffDays / 7) + 1;
   const weekEnd = addDays(weekStart, 6);
@@ -543,7 +543,7 @@ export function computeItemWeeklyClaimPivot(
     const paymentDate = parseDateStr(order.paymentDate);
     if (!paymentDate) return;
 
-    const weekStartDate = saturdayWeekStart(paymentDate);
+    const weekStartDate = mondayWeekStart(paymentDate);
     const weekStartStr = formatYmd(weekStartDate);
     weekStartSet.add(weekStartStr);
 
@@ -581,11 +581,11 @@ export function computeItemWeeklyClaimPivot(
 }
 
 // 처리방법 5종의 주차별 비율 추이 — 구글시트 trend 탭의 일별 처리방법 비율 추이를 이 대시보드의
-// 토요일 시작 주차 단위로 재현한 것. computeHandlingMethodStats와 같은 5종 분류(HANDLING_METHOD_ORDER)를
+// 월요일 시작 주차 단위로 재현한 것. computeHandlingMethodStats와 같은 5종 분류(HANDLING_METHOD_ORDER)를
 // 결제일 기준 주차로 나눠 집계한다.
 export interface MethodWeekBreakdown {
   weekLabel: string;
-  weekStart: string; // "YYYY.MM.DD" (토요일)
+  weekStart: string; // "YYYY.MM.DD" (월요일)
   totalClaims: number;
   methods: {
     결제수단환불: number; // 비중 %
@@ -625,7 +625,7 @@ export function computeMethodBreakdownByWeek(orderItems: OrderItem[], problemFor
     const paymentDate = parseDateStr(order.paymentDate);
     if (!paymentDate) return;
 
-    const weekStartStr = formatYmd(saturdayWeekStart(paymentDate));
+    const weekStartStr = formatYmd(mondayWeekStart(paymentDate));
     weekTotals.set(weekStartStr, (weekTotals.get(weekStartStr) || 0) + 1);
 
     const methodKey = METHOD_KEY_MAP[p.handlingMethod || ""];

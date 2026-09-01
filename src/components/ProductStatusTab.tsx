@@ -5,9 +5,9 @@ import { motion, AnimatePresence } from "motion/react";
 import { useReviews } from "../context/ReviewsContext";
 
 export default function ProductStatusTab() {
-  const { 
-    weeklyReviews: reviewsData, 
-    weeklyIncidents,
+  const {
+    weeklyReviews: reviewsData,
+    weeklyAccidentCountsByProduct,
     productStats: productStatsData,
     setActiveTab,
     setMetricsProductFilter,
@@ -33,9 +33,9 @@ export default function ProductStatusTab() {
     // 별점 리뷰가 아예 없고 CS 사고접수만 있는 상품(예: 아세비)도 후보에서 빠지지 않도록 시드해둔다.
     // reviewsData만 순회하면 이런 상품은 productGroups에 키 자체가 안 생겨서, 아래 accidentCount>0
     // 필터가 있어도 애초에 후보 목록에 오르지 못해 "품질 경고"에서 통째로 누락되는 문제가 있었다.
-    weeklyIncidents.forEach(inc => {
-      if (!productGroups[inc.product]) {
-        productGroups[inc.product] = [];
+    Object.keys(weeklyAccidentCountsByProduct).forEach(product => {
+      if (!productGroups[product]) {
+        productGroups[product] = [];
       }
     });
 
@@ -46,9 +46,7 @@ export default function ProductStatusTab() {
       const neutral = list.filter(r => r.type === "중립").length;
       const notRecommend = list.filter(r => r.type === "비추천").length;
       
-      const accidentCount = weeklyIncidents.filter(
-        i => (i.product === product || i.product.includes(product) || product.includes(i.product)) && i.incidentStatus === "처리완료"
-      ).length;
+      const accidentCount = weeklyAccidentCountsByProduct[product] || 0;
 
       const ratedList = list.filter(r => r.rating > 0);
       const sumRating = ratedList.reduce((sum, r) => sum + r.rating, 0);
@@ -201,7 +199,7 @@ export default function ProductStatusTab() {
         recommendRate
       };
     });
-  }, [reviewsData, weeklyIncidents]);
+  }, [reviewsData, weeklyAccidentCountsByProduct]);
 
   // Filter & Sort table data
   const handleSort = (field: keyof ProductStat) => {

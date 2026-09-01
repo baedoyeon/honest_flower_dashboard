@@ -64,7 +64,7 @@ function AppContent() {
           <div className="flex items-center gap-2">
             <Calendar className="h-4 w-4 text-brand-green" />
             <span className="text-xs font-black text-slate-800">주차별 VOC 조회 필터</span>
-            <span className="text-[10px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full font-bold">토요일 시작 기준</span>
+            <span className="text-[10px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full font-bold">월요일 시작 기준</span>
           </div>
           <div className="flex bg-slate-100/70 rounded-2xl p-1 gap-1 self-start sm:self-auto border border-slate-200/40">
             {filterOptions.map((opt) => {

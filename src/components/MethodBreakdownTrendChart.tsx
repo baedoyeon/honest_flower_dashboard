@@ -54,7 +54,7 @@ export default function MethodBreakdownTrendChart({ weeks }: { weeks: MethodWeek
           <div>
             <h3 className="text-sm font-bold text-slate-900">처리방법 비율 추이</h3>
             <p className="text-[11px] text-slate-400 mt-0.5">
-              주차별(결제일 기준, 토요일 시작) 클레임 처리방법 5종 비중 — 100% 누적. 재발송/결제 수단으로 환불/교환/반품/적립금 환불.
+              주차별(결제일 기준, 월요일 시작) 클레임 처리방법 5종 비중 — 100% 누적. 재발송/결제 수단으로 환불/교환/반품/적립금 환불.
             </p>
           </div>
         </div>

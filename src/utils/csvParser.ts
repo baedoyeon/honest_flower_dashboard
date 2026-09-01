@@ -579,12 +579,10 @@ export function parseCSVToReviews(csvText: string, startId: number = 1): CSVPars
         if (!existing.image_urls.includes(item.image_url)) existing.image_urls.push(item.image_url);
       }
 
-      // If accident report was approved ("처리완료"), set existing review to "비추천" & "사고접수완료"
-      if (item.incidentStatus === "처리완료") {
-        existing.type = "비추천";
-        existing.rating = 1;
-        existing.incidentStatus = "처리완료";
-      }
+      // 사고접수 확정 여부는 (위에서 이미 복사한) incidentStatus 뱃지("🚨 사고접수완료")로 별도
+      // 표시한다 — 원래 리뷰의 rating/type은 덮어쓰지 않는다. 저품질 리뷰이면서 동시에 사고접수도
+      // 된 건을 rating=1로 뭉개버리면, 정상 별점으로 남아있는 다른 사고접수 건과 구분이 안 되고
+      // 원본 데이터도 사라진다.
 
       // Use customer's written review text if current item has written review text
       if ((!existing.review || existing.review.startsWith("사고접수")) && item.review && !item.review.startsWith("사고접수")) {
@@ -1148,6 +1146,7 @@ export function parseCSVToProblemForms(csvText: string, importChannel: "일반" 
         (col.includes("주문번호") && !col.includes("상품주문번호") && !col.includes("상품 주문번호")),
     },
     { key: "orderItemRef", guard: (hasExisting) => !hasExisting, test: (col) => col.includes("상품주문번호") || col.includes("상품 주문번호") },
+    { key: "productName", test: (col) => col.includes("상품명") },
     { key: "receivedDate", test: (col) => col === "접수시간" || (col.includes("접수시간") && !col.includes("재접수")) },
     { key: "accidentType", test: isAccidentTypeColumn },
     { key: "accidentDetail", test: isAccidentDetailColumn },
@@ -1171,6 +1170,7 @@ export function parseCSVToProblemForms(csvText: string, importChannel: "일반" 
   const { indices: pfCols, hasHeader } = detectColumns(headerRow, problemFormColumnRules);
   let colId = pfCols.id;
   let colOrderItemRef = pfCols.orderItemRef;
+  let colProductName = pfCols.productName;
   let colReceivedDate = pfCols.receivedDate;
   let colAccidentType = pfCols.accidentType;
   let colAccidentDetail = pfCols.accidentDetail;
@@ -1209,6 +1209,7 @@ export function parseCSVToProblemForms(csvText: string, importChannel: "일반" 
     const orderItemRef = colOrderItemRef !== -1 && row[colOrderItemRef] ? stripExcelWrapper(row[colOrderItemRef]) : "";
     if (!orderItemRef) return; // FK 없는 행은 클레임코스트 계산에 쓸 수 없으므로 스킵
 
+    const productName = colProductName !== -1 && row[colProductName] ? row[colProductName].trim() : undefined;
     const receivedDate = colReceivedDate !== -1 && row[colReceivedDate] ? normalizeDateStr(row[colReceivedDate]) : undefined;
     const accidentType = colAccidentType !== -1 && row[colAccidentType] ? row[colAccidentType].trim() : "기타";
     const accidentDetail = colAccidentDetail !== -1 && row[colAccidentDetail] ? row[colAccidentDetail].trim() : "";
@@ -1246,6 +1247,7 @@ export function parseCSVToProblemForms(csvText: string, importChannel: "일반" 
     problemForms.push({
       id,
       orderItemRef,
+      productName,
       receivedDate,
       accidentType,
       accidentDetail,
