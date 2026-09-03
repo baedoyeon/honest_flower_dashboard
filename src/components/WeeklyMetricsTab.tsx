@@ -3,7 +3,6 @@ import { ArrowDownRight, ArrowUpRight, MessageSquare, AlertTriangle, Lightbulb, 
 import { motion, AnimatePresence } from "motion/react";
 import { useReviews, getGroupKeysMap } from "../context/ReviewsContext";
 import { computeNpsRates } from "../utils/csvParser";
-import NpsSummaryUploader from "./NpsSummaryUploader";
 import NpsWatchlistWidget from "./NpsWatchlistWidget";
 import NpsTrendWidget from "./NpsTrendWidget";
 import { useState, useMemo } from "react";
@@ -564,7 +563,11 @@ export default function WeeklyMetricsTab() {
             </div>
             <div className="flex items-center gap-2">
               <span className="rounded-full bg-slate-50 px-2.5 py-1 text-[10px] font-bold text-slate-500">단위: %</span>
-              <NpsSummaryUploader />
+              {npsSummary.asOf && (
+                <span className="rounded-full bg-slate-50 px-2.5 py-1 text-[10px] font-bold text-slate-400">
+                  누적 NPS {npsSummary.asOf} 기준 · 아래 "NPS Detractor 이탈 위험군 추적"에서 갱신
+                </span>
+              )}
             </div>
           </div>
 

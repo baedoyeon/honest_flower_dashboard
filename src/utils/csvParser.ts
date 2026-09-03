@@ -1718,14 +1718,21 @@ export function computeNpsRates(summary: NpsSummary): { promoterRate: number; pa
 }
 
 // ============================================================================
-// Part F 우선순위 2/4/5 — NPS 개별 응답(Detractor 전용) CSV 파서
+// Part F 우선순위 1/2/4/5 — NPS 개별 응답 CSV 파서
 //
-// ARES III "내보내기"는 원본 응답 전체(3.4만 건+)를 그대로 뱉어주므로, 업로드 전에 반드시 사용자가
-// "점수 0~6점(Detractor)"만 걸러서 올려야 한다(이번 Part의 "원본 로우를 통째로 프론트에 올리지 않는다"
-// 설계 원칙). 혹시 안 걸러진 행이 섞여 올라와도 조용히 왜곡되지 않도록 score>6인 행은 파서 단에서
-// 한 번 더 방어적으로 드롭하고, 몇 건이 드롭됐는지 결과에 담아 업로드 화면에 알려준다.
-// 이 한 데이터셋을 우선순위 2(고액구매 워치리스트), 4(Detractor 피드백 카테고리 분석), 5(리뷰 미작성
-// 교차 세그먼트) 세 기능이 공유한다 — CSV를 세 번 따로 올릴 필요가 없다.
+// ARES III "내보내기"는 원본 응답 전체(3.4만 건+)를 그대로 뱉어주는데, 이 파서는 그 파일을 사전
+// 필터링 없이 그대로 받아도 된다 — 업로드된 CSV에 실제로 들어있는 행들만으로 promoter(9~10점)/
+// passive(7~8점)/detractor(0~6점) 건수를 직접 집계해 요약치(summary)를 만들고, 그중 detractor
+// 행만 별도로 추려(detractorRows) 반환한다. 즉 한 번의 업로드로 우선순위 1(누적 NPS 요약)과
+// 우선순위 2/4/5(고액구매 워치리스트·피드백 카테고리 분석·리뷰 미작성 세그먼트)를 동시에 채운다 —
+// "요약 문구 붙여넣기"와 "Detractor CSV 업로드"를 굳이 별개 위젯 두 개로 만들 이유가 없다.
+//
+// 성능 원칙과의 관계: "원본 로우를 프론트에 올리지 않는다"는 원칙은 "state/localStorage에 3.4만
+// 건을 계속 들고 있지 않는다"는 뜻이지, "브라우저가 CSV 텍스트를 한 번 파싱하는 것"까지 금지하는
+// 게 아니다 — 이 함수는 업로드 시점에 한 번 전체를 훑고, 실제로 저장되는 건 요약 숫자 4개 +
+// detractor 서브셋(보통 수백~수천 건)뿐이다. 그래도 사용자가 원한다면 이미 detractor만 걸러진
+// 작은 CSV를 올려도 그대로 동작한다(그 경우 summary의 promoters/passives는 0으로 집계되므로,
+// 호출부에서 "이 파일이 전체 응답인지" 확인 체크박스로 summary 반영 여부를 사용자가 직접 결정한다).
 // ============================================================================
 
 export interface NpsDetractorRow {
@@ -1740,25 +1747,30 @@ export interface NpsDetractorRow {
   respondedAt?: string; // CREATED AT 원문 그대로(형식이 CSV마다 다를 수 있어 별도 정규화하지 않음)
 }
 
-export interface NpsDetractorParseResult {
-  rows: NpsDetractorRow[];
+export interface NpsResponsesParseResult {
+  // 업로드된 CSV에 실제로 담긴 행들만으로 집계한 값 — 파일이 진짜 "전체 응답"인지는 파서가 알 수
+  // 없으므로, 이 summary를 npsSummary(누적 NPS 카드)에 반영할지는 호출부(UI)의 사용자 확인에 맡긴다.
+  summary: NpsSummary;
+  detractorRows: NpsDetractorRow[]; // score 0~6인 행만
   totalRows: number;
-  validCount: number;
-  droppedNonDetractorCount: number; // score>6이라 방어적으로 제외된 행 수 — 업로드 화면 경고용
+  validCount: number; // 점수를 정상적으로 읽은 행 수(0~10 범위를 벗어나면 무효 처리)
   missingCriticalColumns: string[];
   isLikelyWrongFileType: boolean;
   detectedColumns: string[];
 }
 
-export function parseCSVToNpsDetractors(csvText: string): NpsDetractorParseResult {
+export function parseCSVToNpsResponses(csvText: string): NpsResponsesParseResult {
   const rawRows = parseCSVRows(csvText);
   if (rawRows.length === 0) {
-    return { rows: [], totalRows: 0, validCount: 0, droppedNonDetractorCount: 0, missingCriticalColumns: [], isLikelyWrongFileType: false, detectedColumns: [] };
+    return {
+      summary: { total: 0, promoters: 0, passives: 0, detractors: 0 },
+      detractorRows: [], totalRows: 0, validCount: 0, missingCriticalColumns: [], isLikelyWrongFileType: false, detectedColumns: []
+    };
   }
 
   const headerRow = rawRows[0].map(h => h.toLowerCase());
 
-  const npsDetractorColumnRules: ColumnRule[] = [
+  const npsResponseColumnRules: ColumnRule[] = [
     { key: "id", test: isIdColumn },
     { key: "customerName", test: isReviewerNameColumn },
     { key: "email", test: (col) => col.includes("이메일") || col.includes("email") },
@@ -1770,15 +1782,15 @@ export function parseCSVToNpsDetractors(csvText: string): NpsDetractorParseResul
     { key: "respondedAt", test: (col) => col.includes("created") || col.includes("응답일") || col.includes("작성일") || col === "date" },
   ];
 
-  const { indices: cols, hasHeader } = detectColumns(headerRow, npsDetractorColumnRules);
+  const { indices: cols, hasHeader } = detectColumns(headerRow, npsResponseColumnRules);
 
   const { isLikelyWrongFileType, missingCriticalColumns, detectedColumns } = checkSchemaMismatch(hasHeader, cols, [
     { key: "score", label: "점수(score)" },
   ], rawRows[0]);
 
   const dataRows = hasHeader ? rawRows.slice(1) : rawRows;
-  const rows: NpsDetractorRow[] = [];
-  let droppedNonDetractorCount = 0;
+  const detractorRows: NpsDetractorRow[] = [];
+  let promoters = 0, passives = 0, detractors = 0, validCount = 0;
   let autoSeq = 1;
 
   dataRows.forEach(row => {
@@ -1786,9 +1798,14 @@ export function parseCSVToNpsDetractors(csvText: string): NpsDetractorParseResul
 
     const scoreRaw = cols.score !== -1 && row[cols.score] ? row[cols.score].trim() : "";
     const score = scoreRaw ? parseInt(scoreRaw.replace(/[^0-9-]/g, ""), 10) : NaN;
-    if (isNaN(score)) return;
-    if (score > 6) { droppedNonDetractorCount++; return; } // Detractor 정의(0~6점) 강제 재필터
+    if (isNaN(score) || score < 0 || score > 10) return; // 표준 NPS 점수 범위(0~10) 밖이면 무효 처리
+    validCount++;
 
+    if (score >= 9) { promoters++; return; }
+    if (score >= 7) { passives++; return; }
+
+    // 0~6점 Detractor만 상세 필드까지 채워서 보관(우선순위 2/4/5용)
+    detractors++;
     const customerName = cols.customerName !== -1 && row[cols.customerName] ? row[cols.customerName].trim() : "";
     const email = cols.email !== -1 && row[cols.email] ? row[cols.email].trim() : "";
     const purchaseCountRaw = cols.purchaseCount !== -1 ? row[cols.purchaseCount] : "";
@@ -1801,7 +1818,7 @@ export function parseCSVToNpsDetractors(csvText: string): NpsDetractorParseResul
     const csvId = cols.id !== -1 && row[cols.id] ? row[cols.id].trim() : "";
     const id = csvId || `${email || customerName || "row"}_${respondedAt || autoSeq++}`;
 
-    rows.push({
+    detractorRows.push({
       id,
       customerName: customerName || undefined,
       email: email || undefined,
@@ -1815,10 +1832,10 @@ export function parseCSVToNpsDetractors(csvText: string): NpsDetractorParseResul
   });
 
   return {
-    rows,
+    summary: { total: validCount, promoters, passives, detractors },
+    detractorRows,
     totalRows: dataRows.length,
-    validCount: rows.length,
-    droppedNonDetractorCount,
+    validCount,
     missingCriticalColumns,
     isLikelyWrongFileType,
     detectedColumns
