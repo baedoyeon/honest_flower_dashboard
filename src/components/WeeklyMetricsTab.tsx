@@ -2,6 +2,10 @@ import { BarChart, Bar, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Resp
 import { ArrowDownRight, ArrowUpRight, MessageSquare, AlertTriangle, Lightbulb, Users, BarChart2, Star, Search, Sparkles, ThumbsUp, X, Sprout, ArrowUpDown } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { useReviews, getGroupKeysMap } from "../context/ReviewsContext";
+import { computeNpsRates } from "../utils/csvParser";
+import NpsSummaryUploader from "./NpsSummaryUploader";
+import NpsWatchlistWidget from "./NpsWatchlistWidget";
+import NpsTrendWidget from "./NpsTrendWidget";
 import { useState, useMemo } from "react";
 
 export default function WeeklyMetricsTab() {
@@ -15,8 +19,11 @@ export default function WeeklyMetricsTab() {
     metricsTypeFilter: selectedCardFilter,
     setMetricsTypeFilter: setSelectedCardFilter,
     weekFilter,
-    setActiveTab
+    setActiveTab,
+    npsSummary
   } = useReviews();
+
+  const npsRates = useMemo(() => computeNpsRates(npsSummary), [npsSummary]);
 
   const periodLabel = weekFilter === "this" ? "금주" : weekFilter === "last" ? "전주" : "전체기간";
 
@@ -61,32 +68,24 @@ export default function WeeklyMetricsTab() {
 
   const [selectedPhotoPreview, setSelectedPhotoPreview] = useState<{ url: string; title: string } | null>(null);
 
-  // Comparison logic against national NPS baseline (86.1% recommendation and 4.9% detraction)
-  const isRecommendLower = recommendRate < 86.1;
-  const recommendDiff = Math.abs(recommendRate - 86.1).toFixed(1);
+  // Comparison logic against live 전사 NPS baseline (ReviewsContext.npsSummary, 업로드 전엔 확인 시점
+  // 스냅샷 시드값) — 예전엔 86.1/9.0/4.9가 코드에 그대로 박혀 있던 오래된 목업값이었다.
+  const npsBarKey = `누적 NPS (${npsSummary.total.toLocaleString()}건)`;
+  const photoReviewBarKey = `${periodLabel} 사진 후기 (${totalCount}건)`;
 
-  const isDetractorHigher = notRecommendRate > 4.9;
-  const detractorDiff = Math.abs(notRecommendRate - 4.9).toFixed(1);
+  const isRecommendLower = recommendRate < npsRates.promoterRate;
+  const recommendDiff = Math.abs(recommendRate - npsRates.promoterRate).toFixed(1);
+
+  const isDetractorHigher = notRecommendRate > npsRates.detractorRate;
+  const detractorDiff = Math.abs(notRecommendRate - npsRates.detractorRate).toFixed(1);
 
   const comparisonData = useMemo(() => {
     return [
-      {
-        name: "추천 (Promoter)",
-        [`${periodLabel} 사진 후기 (${totalCount}건)`]: recommendRate,
-        "누적 NPS (2.6만건)": 86.1,
-      },
-      {
-        name: "중립 (Passive)",
-        [`${periodLabel} 사진 후기 (${totalCount}건)`]: neutralRate,
-        "누적 NPS (2.6만건)": 9.0,
-      },
-      {
-        name: "비추천 (Detractor)",
-        [`${periodLabel} 사진 후기 (${totalCount}건)`]: notRecommendRate,
-        "누적 NPS (2.6만건)": 4.9,
-      },
+      { name: "추천 (Promoter)", [photoReviewBarKey]: recommendRate, [npsBarKey]: npsRates.promoterRate },
+      { name: "중립 (Passive)", [photoReviewBarKey]: neutralRate, [npsBarKey]: npsRates.passiveRate },
+      { name: "비추천 (Detractor)", [photoReviewBarKey]: notRecommendRate, [npsBarKey]: npsRates.detractorRate },
     ];
-  }, [totalCount, recommendRate, neutralRate, notRecommendRate, periodLabel]);
+  }, [photoReviewBarKey, npsBarKey, recommendRate, neutralRate, notRecommendRate, npsRates]);
 
   // Compute filtered incidents list for the detailed interactive list at the bottom when 사고접수 is selected
   const filteredIncidents = useMemo(() => {
@@ -563,7 +562,10 @@ export default function WeeklyMetricsTab() {
               </h4>
               <p className="text-xs text-slate-400 font-medium">사진을 첨부한 후기는 전체 만족도 조사(NPS)에 비해 비추천 비율이 높게 나타납니다.</p>
             </div>
-            <span className="rounded-full bg-slate-50 px-2.5 py-1 text-[10px] font-bold text-slate-500">단위: %</span>
+            <div className="flex items-center gap-2">
+              <span className="rounded-full bg-slate-50 px-2.5 py-1 text-[10px] font-bold text-slate-500">단위: %</span>
+              <NpsSummaryUploader />
+            </div>
           </div>
 
           <div className="h-80 w-full">
@@ -584,14 +586,14 @@ export default function WeeklyMetricsTab() {
                 <Legend iconType="circle" wrapperStyle={{ fontSize: 11, fontWeight: "bold" }} />
                 
                 {/* Weekly Photo Reviews with interactive cell coloring based on selected filter */}
-                <Bar dataKey={`금주 사진 후기 (${totalCount}건)`} fill="#7cb342" radius={[6, 6, 0, 0]}>
+                <Bar dataKey={photoReviewBarKey} fill="#7cb342" radius={[6, 6, 0, 0]}>
                   {comparisonData.map((entry, index) => {
-                    const isMatched = 
+                    const isMatched =
                       selectedCardFilter === "all" ||
                       (selectedCardFilter === "추천" && entry.name.includes("추천")) ||
                       (selectedCardFilter === "중립" && entry.name.includes("중립")) ||
                       (selectedCardFilter === "비추천" && entry.name.includes("비추천"));
-                      
+
                     let cellColor = "#7cb342"; // default active brand green
                     if (selectedCardFilter !== "all" && !isMatched) {
                       cellColor = "#cbd5e1"; // dim other bars
@@ -600,15 +602,15 @@ export default function WeeklyMetricsTab() {
                     } else if (selectedCardFilter === "비추천" && isMatched) {
                       cellColor = "#ef4444"; // red for detractor focus
                     }
-                    
+
                     return <Cell key={`cell-${index}`} fill={cellColor} />;
                   })}
-                  <LabelList dataKey={`금주 사진 후기 (${totalCount}건)`} position="top" formatter={(v: number) => `${v}%`} style={{ fontSize: 11, fontWeight: "bold", fill: "#1e293b" }} />
+                  <LabelList dataKey={photoReviewBarKey} position="top" formatter={(v: number) => `${v}%`} style={{ fontSize: 11, fontWeight: "bold", fill: "#1e293b" }} />
                 </Bar>
-                
+
                 {/* Cumulative NPS */}
-                <Bar dataKey="누적 NPS (2.6만건)" fill="#94a3b8" radius={[6, 6, 0, 0]}>
-                  <LabelList dataKey="누적 NPS (2.6만건)" position="top" formatter={(v: number) => `${v}%`} style={{ fontSize: 11, fontWeight: "bold", fill: "#64748b" }} />
+                <Bar dataKey={npsBarKey} fill="#94a3b8" radius={[6, 6, 0, 0]}>
+                  <LabelList dataKey={npsBarKey} position="top" formatter={(v: number) => `${v}%`} style={{ fontSize: 11, fontWeight: "bold", fill: "#64748b" }} />
                 </Bar>
               </BarChart>
             </ResponsiveContainer>
@@ -678,6 +680,13 @@ export default function WeeklyMetricsTab() {
           </div>
         </div>
 
+      </div>
+
+      {/* Part F 우선순위 2/3/5 — NPS Detractor 워치리스트/이탈위험 세그먼트 + NPS 스코어 추이.
+          워치리스트 테이블 컬럼이 많아 2단 그리드로 두면 너무 좁아지므로 세로로 쌓는다. */}
+      <div className="space-y-6">
+        <NpsWatchlistWidget />
+        <NpsTrendWidget />
       </div>
 
       {/* Detailed Filtered Review & Incident List Section */}

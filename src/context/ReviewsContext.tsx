@@ -4,7 +4,7 @@ import { Incident, initialIncidentsData } from "../data/initialIncidents";
 import { OrderItem, initialOrderItemsData } from "../data/orderItems";
 import { ProblemForm, initialProblemFormsData } from "../data/problemForms";
 import { ChatRoom, initialChatRoomsData } from "../data/chatRooms";
-import { CsCostExportRow, DispatchFailureRow, classifyCategory, getDepartmentForCategory } from "../utils/csvParser";
+import { CsCostExportRow, DispatchFailureRow, NpsSummary, NpsDetractorRow, NpsTrendPoint, classifyCategory, getDepartmentForCategory } from "../utils/csvParser";
 import { defaultCompanyHolidays } from "../data/companyHolidays";
 import { idbLoad, idbSave } from "../utils/idbStorage";
 import { DEFAULT_MONTHLY_CS_LABOR_COST_ALLOCATION_KRW } from "../utils/chatRoomEngine";
@@ -94,6 +94,25 @@ interface ReviewsContextType {
   importDispatchFailureWeekly: (rows: DispatchFailureRow[], replace?: boolean) => void;
   dispatchFailureMonthly: DispatchFailureRow[];
   importDispatchFailureMonthly: (rows: DispatchFailureRow[], replace?: boolean) => void;
+  // Part F — 전사 NPS 요약치(ARES III 원본 응답 3.4만 건+는 절대 프론트로 올리지 않고, 사전 집계된
+  // total/promoters/passives/detractors 요약값만 보관). "금주 사진후기 vs 전사 누적 NPS" 비교 차트의
+  // 데이터 소스 — 최초값은 확인 시점 스냅샷으로 시드해두고, CSV/문구 재업로드 시 통째로 교체된다.
+  npsSummary: NpsSummary;
+  importNpsSummary: (summary: NpsSummary) => void;
+  // Part F 우선순위 2/4/5 — NPS Detractor(0~6점) 응답 전용(ARES III 원본 응답 3.4만 건+가 아니라
+  // 사용자가 미리 걸러 올린 수십~수백 건). 재업로드 시 항상 통째로 교체(csCostExportRows와 동일 패턴).
+  npsDetractorRows: NpsDetractorRow[];
+  importNpsDetractorRows: (rows: NpsDetractorRow[]) => void;
+  // "연락완료" 컨택 상태 — npsDetractorRows.id를 키로 쓰는 별도 Set(리뷰의 resolvedActionIds와 동일
+  // 패턴). 데이터 재업로드로 rows가 통째로 바뀌어도 이미 컨택한 고객의 완료 표시는 유지된다.
+  npsContactedIds: Set<string>;
+  toggleNpsContact: (id: string) => void;
+  // 우선순위 2 "구매횟수 임계값" — 관리자가 조정 가능해야 한다는 스펙 요건. 기본값 5회.
+  npsWatchlistThreshold: number;
+  setNpsWatchlistThreshold: (n: number) => void;
+  // Part F 우선순위 3 — NPS 스코어 추이(월/주별 집계, 로우 데이터 아님). period 기준 병합.
+  npsTrend: NpsTrendPoint[];
+  importNpsTrend: (rows: NpsTrendPoint[], replace?: boolean) => void;
   productStats: ProductStat[];
   isLoading: boolean;
   addReview: (review: Omit<Review, "id">) => Promise<void>;
@@ -153,6 +172,22 @@ const COMPANY_HOLIDAYS_STORAGE_KEY = "honestflower_companyHolidays";
 const MONTHLY_CS_LABOR_COST_ALLOCATION_STORAGE_KEY = "honestflower_monthlyCsLaborCostAllocation";
 const DISPATCH_FAILURE_WEEKLY_STORAGE_KEY = "honestflower_dispatchFailureWeekly";
 const DISPATCH_FAILURE_MONTHLY_STORAGE_KEY = "honestflower_dispatchFailureMonthly";
+const NPS_SUMMARY_STORAGE_KEY = "honestflower_npsSummary";
+const NPS_DETRACTOR_ROWS_STORAGE_KEY = "honestflower_npsDetractorRows";
+const NPS_CONTACTED_IDS_STORAGE_KEY = "honestflower_npsContactedIds";
+const NPS_WATCHLIST_THRESHOLD_STORAGE_KEY = "honestflower_npsWatchlistThreshold";
+const NPS_TREND_STORAGE_KEY = "honestflower_npsTrend";
+const DEFAULT_NPS_WATCHLIST_THRESHOLD = 5;
+
+// 2026-09-03 ARES III 어드민 확인 스냅샷(NPS 78, total 34,211) — 실제 업로드 전까지의 초기 시드값.
+// 재업로드하면 이 값은 통째로 교체된다.
+const DEFAULT_NPS_SUMMARY: NpsSummary = {
+  total: 34211,
+  promoters: 28867,
+  passives: 3180,
+  detractors: 2164,
+  asOf: "2026.09.03"
+};
 // "처리완료로 표시" 수동 오버라이드(리뷰 대상)는 원본 데이터를 건드리지 않고 이 id 집합으로만
 // 관리한다 — CSV를 다시 업로드해도(원본 배열이 통째로 교체돼도) 표시가 사라지지 않게 하기 위함.
 const RESOLVED_ACTION_IDS_STORAGE_KEY = "honestflower_resolvedActionIds";
@@ -429,6 +464,11 @@ export function ReviewsProvider({ children }: { children: React.ReactNode }) {
   const [monthlyCsLaborCostAllocation, setMonthlyCsLaborCostAllocation] = useState<number>(() => loadFromLocalStorage(MONTHLY_CS_LABOR_COST_ALLOCATION_STORAGE_KEY, DEFAULT_MONTHLY_CS_LABOR_COST_ALLOCATION_KRW));
   const [dispatchFailureWeekly, setDispatchFailureWeekly] = useState<DispatchFailureRow[]>(() => loadFromLocalStorage(DISPATCH_FAILURE_WEEKLY_STORAGE_KEY, []));
   const [dispatchFailureMonthly, setDispatchFailureMonthly] = useState<DispatchFailureRow[]>(() => loadFromLocalStorage(DISPATCH_FAILURE_MONTHLY_STORAGE_KEY, []));
+  const [npsSummary, setNpsSummary] = useState<NpsSummary>(() => loadFromLocalStorage(NPS_SUMMARY_STORAGE_KEY, DEFAULT_NPS_SUMMARY));
+  const [npsDetractorRows, setNpsDetractorRows] = useState<NpsDetractorRow[]>(() => loadFromLocalStorage(NPS_DETRACTOR_ROWS_STORAGE_KEY, []));
+  const [npsContactedIds, setNpsContactedIds] = useState<Set<string>>(() => new Set(loadFromLocalStorage<string[]>(NPS_CONTACTED_IDS_STORAGE_KEY, [])));
+  const [npsWatchlistThreshold, setNpsWatchlistThreshold] = useState<number>(() => loadFromLocalStorage(NPS_WATCHLIST_THRESHOLD_STORAGE_KEY, DEFAULT_NPS_WATCHLIST_THRESHOLD));
+  const [npsTrend, setNpsTrend] = useState<NpsTrendPoint[]>(() => loadFromLocalStorage(NPS_TREND_STORAGE_KEY, []));
   const [resolvedActionIds, setResolvedActionIds] = useState<Set<string>>(() => new Set(loadFromLocalStorage<string[]>(RESOLVED_ACTION_IDS_STORAGE_KEY, [])));
 
   // Dynamically compute deduplicated and image-merged reviews list for all metrics and components
@@ -563,6 +603,26 @@ export function ReviewsProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     saveToLocalStorage(DISPATCH_FAILURE_MONTHLY_STORAGE_KEY, dispatchFailureMonthly);
   }, [dispatchFailureMonthly]);
+
+  useEffect(() => {
+    saveToLocalStorage(NPS_SUMMARY_STORAGE_KEY, npsSummary);
+  }, [npsSummary]);
+
+  useEffect(() => {
+    saveToLocalStorage(NPS_DETRACTOR_ROWS_STORAGE_KEY, npsDetractorRows);
+  }, [npsDetractorRows]);
+
+  useEffect(() => {
+    saveToLocalStorage(NPS_CONTACTED_IDS_STORAGE_KEY, Array.from(npsContactedIds));
+  }, [npsContactedIds]);
+
+  useEffect(() => {
+    saveToLocalStorage(NPS_WATCHLIST_THRESHOLD_STORAGE_KEY, npsWatchlistThreshold);
+  }, [npsWatchlistThreshold]);
+
+  useEffect(() => {
+    saveToLocalStorage(NPS_TREND_STORAGE_KEY, npsTrend);
+  }, [npsTrend]);
 
   useEffect(() => {
     saveToLocalStorage(RESOLVED_ACTION_IDS_STORAGE_KEY, Array.from(resolvedActionIds));
@@ -980,6 +1040,42 @@ export function ReviewsProvider({ children }: { children: React.ReactNode }) {
     setDispatchFailureMonthly(combined);
   };
 
+  // NPS 요약치는 항상 통째로 교체(과거값과 병합할 개념 자체가 없음 — 시점 스냅샷 하나뿐).
+  // asOf가 없으면(문구/CSV에 날짜 정보가 없는 대부분의 경우) 업로드하는 지금 시각의 KST 날짜를 채운다.
+  const importNpsSummary = (summary: NpsSummary) => {
+    setNpsSummary({ ...summary, asOf: summary.asOf || formatKSTDate(getKSTDate()) });
+  };
+
+  // csCostExportRows와 동일하게 병합 개념 없이 항상 전체 교체 — 컨택 상태는 npsContactedIds에
+  // id로 별도 보관되니, rows가 통째로 바뀌어도(재업로드) 이미 컨택 완료한 고객 표시는 안 사라진다.
+  const importNpsDetractorRows = (rows: NpsDetractorRow[]) => {
+    setNpsDetractorRows(rows);
+  };
+
+  const toggleNpsContact = (id: string) => {
+    setNpsContactedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  // 로우 데이터가 아니라 이미 집계된 기간별 스코어라 발송불가율(Part E)과 동일하게 period 기준 병합.
+  const importNpsTrend = (newRows: NpsTrendPoint[], replace: boolean = true) => {
+    let combined: NpsTrendPoint[];
+    if (!replace) {
+      const map = new Map<string, NpsTrendPoint>();
+      npsTrend.forEach(r => map.set(r.period, { ...r }));
+      newRows.forEach(r => map.set(r.period, { ...r }));
+      combined = Array.from(map.values());
+    } else {
+      combined = [...newRows];
+    }
+    combined.sort((a, b) => a.period.localeCompare(b.period));
+    setNpsTrend(combined);
+  };
+
   // Bulk import parsed CSV reviews into local state (IndexedDB에 저장됨, Firestore 연동 아님)
   const importParsedReviews = async (newReviews: Review[], append: boolean = true) => {
     setIsSyncing(true);
@@ -1075,6 +1171,16 @@ export function ReviewsProvider({ children }: { children: React.ReactNode }) {
       importDispatchFailureWeekly,
       dispatchFailureMonthly,
       importDispatchFailureMonthly,
+      npsSummary,
+      importNpsSummary,
+      npsDetractorRows,
+      importNpsDetractorRows,
+      npsContactedIds,
+      toggleNpsContact,
+      npsWatchlistThreshold,
+      setNpsWatchlistThreshold,
+      npsTrend,
+      importNpsTrend,
       companyHolidays,
       setCompanyHolidays,
       monthlyCsLaborCostAllocation,

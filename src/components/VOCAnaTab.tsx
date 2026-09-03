@@ -1,11 +1,12 @@
 import { useMemo, useState } from "react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from "recharts";
-import { Award, ShieldAlert, Sparkles, Building2, Quote, AlertTriangle, BookOpen, Layers, CheckCircle2, HelpCircle, FileText, Filter, Search, ShieldCheck, Clock, ExternalLink } from "lucide-react";
+import { Award, ShieldAlert, Sparkles, Building2, Quote, AlertTriangle, BookOpen, Layers, CheckCircle2, HelpCircle, FileText, Filter, Search, ShieldCheck, Clock, ExternalLink, ThumbsDown, ArrowRight } from "lucide-react";
 import { motion } from "motion/react";
 import { useReviews } from "../context/ReviewsContext";
+import { classifyCategory } from "../utils/csvParser";
 
 export default function VOCAnaTab() {
-  const { weeklyReviews: reviewsData } = useReviews();
+  const { weeklyReviews: reviewsData, npsDetractorRows, setActiveTab } = useReviews();
   const [activeGuideTab, setActiveGuideTab] = useState<"categories" | "judgment" | "patterns">("categories");
 
   // 1. Dynamic aggregation of categories and their ratings
@@ -34,6 +35,31 @@ export default function VOCAnaTab() {
       total: agg[cat].recommend + agg[cat].neutral + agg[cat].notRecommend,
     }));
   }, [reviewsData]);
+
+  // Part F 우선순위 4 — NPS Detractor(0~6점) 피드백을 기존 VOC 대분류(품질/상태·배송/포장·
+  // 상품구성/양·서비스/시스템) 기준으로 재사용해 사유별 빈도를 집계한다. classifyCategory는 이미
+  // 리뷰 CSV 파싱에도 쓰이는 동일 함수라 리뷰 VOC와 같은 잣대로 비교 가능하다. 표준 NPS 정의대로
+  // 0~6점을 전부 Detractor로 취급하고(5~6점도 별도로 빼지 않음), 피드백 텍스트가 없는 응답은 제외한다.
+  const detractorCategoryStats = useMemo(() => {
+    const categories = ["품질/상태", "배송/포장", "상품구성/양", "서비스/시스템"] as const;
+    const counts: Record<string, number> = { "품질/상태": 0, "배송/포장": 0, "상품구성/양": 0, "서비스/시스템": 0 };
+    const samples: Record<string, string[]> = { "품질/상태": [], "배송/포장": [], "상품구성/양": [], "서비스/시스템": [] };
+
+    let withFeedback = 0;
+    npsDetractorRows.forEach(r => {
+      if (!r.feedback) return;
+      withFeedback++;
+      const cat = classifyCategory(r.feedback, 0, undefined);
+      const key = categories.includes(cat as any) ? cat : "품질/상태";
+      counts[key]++;
+      if (samples[key].length < 2) samples[key].push(r.feedback!);
+    });
+
+    return {
+      total: withFeedback,
+      breakdown: categories.map(cat => ({ name: cat, count: counts[cat], samples: samples[cat] })).sort((a, b) => b.count - a.count)
+    };
+  }, [npsDetractorRows]);
 
   // 2. Identify Top 3 categories of concern based on '비추천' counts
   const topConcernCategories = useMemo(() => {
@@ -247,6 +273,52 @@ export default function VOCAnaTab() {
                 </p>
               </div>
             </div>
+          </div>
+
+          {/* Part F 우선순위 4 — NPS Detractor(0~6점) 피드백 키워드 분석 (기존 VOC 대분류 재사용) */}
+          <div className="rounded-3xl border border-slate-100 bg-white p-6 shadow-sm">
+            <div className="mb-4 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <ThumbsDown className="h-4 w-4 text-rose-600" />
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">NPS Detractor(0~6점) 피드백 카테고리 분석</h3>
+                  <p className="text-xs text-slate-400 font-medium">
+                    업로드된 NPS Detractor 응답의 피드백 텍스트를 위와 동일한 VOC 대분류 기준으로 재분류했습니다.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {detractorCategoryStats.total === 0 ? (
+              <div className="text-center py-10 space-y-3">
+                <ThumbsDown className="h-8 w-8 text-slate-300 mx-auto" />
+                <p className="text-xs text-slate-400">아직 업로드된 NPS Detractor 피드백이 없습니다.</p>
+                <button
+                  onClick={() => setActiveTab("metrics")}
+                  className="inline-flex items-center gap-1.5 text-xs font-bold text-brand-green-dark hover:underline cursor-pointer"
+                >
+                  <span>주간 핵심 지표 탭에서 업로드하기</span>
+                  <ArrowRight className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                {detractorCategoryStats.breakdown.map((item) => {
+                  const pct = detractorCategoryStats.total > 0 ? Math.round((item.count / detractorCategoryStats.total) * 100) : 0;
+                  return (
+                    <div key={item.name} className="rounded-2xl border border-rose-100 bg-rose-50/20 p-4 space-y-2">
+                      <div className="flex items-baseline justify-between">
+                        <p className="text-xs font-bold text-slate-800">{item.name}</p>
+                        <p className="text-lg font-black text-rose-700">{item.count}<span className="text-[10px] font-bold text-slate-400 ml-0.5">건 ({pct}%)</span></p>
+                      </div>
+                      {item.samples.slice(0, 1).map((s, i) => (
+                        <p key={i} className="text-[10px] text-slate-500 leading-relaxed line-clamp-2">"{s}"</p>
+                      ))}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           {/* 2. 비추천 TOP 3 VOC 텍스트 표시 */}
