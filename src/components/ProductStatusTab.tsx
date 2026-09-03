@@ -2,21 +2,53 @@ import { useState, useMemo } from "react";
 import { ProductStat } from "../data/classifiedReviews";
 import { AlertTriangle, TrendingDown, CheckCircle2, Search, ArrowUpDown, Flame, HelpCircle, Star, X, MessageSquare } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
-import { useReviews } from "../context/ReviewsContext";
+import { useReviews, AccidentCategoryRecord, AccidentTopCategory } from "../context/ReviewsContext";
+
+// 어드민 사고접수 태깅 대분류 배지 순서 — 미니 브레이크다운도 이 순서로 표시한다.
+const ACCIDENT_CATEGORIES: AccidentTopCategory[] = ["품질", "출고", "배송", "기타불만"];
+// 대표 인용으로 카드에 바로 노출할 사고접수 상세 개수. 나머지는 "N건 더 보기"로 접는다.
+const ACCIDENT_QUOTE_PREVIEW_COUNT = 2;
+// 1위-2위 대분류 비중 차이가 이 값(퍼센트 포인트) 이내면 특정 대분류로 단정짓지 않고 "복합 이슈"로 표시.
+const MIXED_ISSUE_THRESHOLD_PP = 20;
+
+function summarizeAccidentBreakdown(records: AccidentCategoryRecord[]) {
+  const breakdown: Record<AccidentTopCategory, number> = { "품질": 0, "출고": 0, "배송": 0, "기타불만": 0 };
+  records.forEach(r => { breakdown[r.topCategory]++; });
+
+  const total = records.length;
+  let badgeLabel = "품질 경고"; // 사고접수 레코드가 없는 경우(비추천/저평점만으로 선정된 카드) 기본값 유지
+  if (total > 0) {
+    const sorted = ACCIDENT_CATEGORIES
+      .map(cat => [cat, breakdown[cat]] as const)
+      .sort((a, b) => b[1] - a[1]);
+    const [topCat, topCount] = sorted[0];
+    const secondCount = sorted[1]?.[1] || 0;
+    const topPct = (topCount / total) * 100;
+    const secondPct = (secondCount / total) * 100;
+    badgeLabel = secondCount > 0 && topPct - secondPct <= MIXED_ISSUE_THRESHOLD_PP
+      ? "복합 이슈"
+      : `${topCat} 경고`;
+  }
+
+  return { breakdown, badgeLabel };
+}
 
 export default function ProductStatusTab() {
   const {
     weeklyReviews: reviewsData,
     weeklyAccidentCountsByProduct,
+    weeklyAccidentRecordsByProduct,
     productStats: productStatsData,
     setActiveTab,
     setMetricsProductFilter,
     setMetricsTypeFilter
   } = useReviews();
-  
+
   const [searchTerm, setSearchTerm] = useState("");
   const [sortField, setSortField] = useState<keyof ProductStat>("totalCount");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
+  // 카드별 "사고접수 상세 전체 보기" 토글 상태 (product 문자열을 키로 사용)
+  const [expandedAccidentCards, setExpandedAccidentCards] = useState<Record<string, boolean>>({});
 
 
   // Aggregate stats for the 3 caution products dynamically based on reviews data for the selected period
@@ -101,7 +133,9 @@ export default function ProductStatusTab() {
       
       // Extract specific issues by analyzing review text keywords & accidents
       const negativeReviews = productReviews.filter(r => r.type === "비추천" || r.type === "중립");
-      const accidentReviews = productReviews.filter(r => r.incidentStatus !== undefined || r.accidentType !== undefined || r.refundAmount !== undefined || (r as any).type === "사고접수");
+      // 실제 사고접수(ProblemForm/Incident) 레코드 — weeklyAccidentCountsByProduct와 동일 소스라
+      // accidentRecords.length가 항상 accidentCount와 일치한다(리뷰 전체를 통째로 나열하던 버그 수정).
+      const accidentRecords: AccidentCategoryRecord[] = weeklyAccidentRecordsByProduct[product] || [];
 
       let issues: string[] = [];
       let hasWilt = false;
@@ -125,14 +159,14 @@ export default function ProductStatusTab() {
       if (hasVolume) issues.push("풍성함 부족");
       if (hasDelivery) issues.push("배송 지연/포장 손상");
 
-      // Extract accident details
+      // 카드에 바로 노출할 대표 인용(중복 제거 후 앞 2개) — 나머지는 토글/사고접수 탭 링크로 대체
       const accidentDetailsList: string[] = [];
-      accidentReviews.forEach(r => {
-        const detail = r.accidentDetail || r.accidentType || (r.review && !r.review.startsWith("사고접수") ? r.review : "");
-        if (detail && !accidentDetailsList.includes(detail)) {
-          accidentDetailsList.push(detail);
+      accidentRecords.forEach(r => {
+        if (r.detail && !accidentDetailsList.includes(r.detail)) {
+          accidentDetailsList.push(r.detail);
         }
       });
+      const { breakdown: accidentBreakdown, badgeLabel } = summarizeAccidentBreakdown(accidentRecords);
 
       if (accidentCount > 0) {
         issues.push(`CS 사고접수 ${accidentCount}건`);
@@ -172,14 +206,12 @@ export default function ProductStatusTab() {
                         productReviews[0]?.review || 
                         "";
       
-      // Generate description incorporating accident details
+      // Generate description — 사고접수 상세는 카드 내 별도 섹션(브레이크다운+대표 인용)에서
+      // 노출하므로, 요약 문단은 일반 후기 인용 하나만 유지해 카드가 무한정 길어지지 않게 한다.
       let desc = "";
       if (notRecommend > 0 || neutral > 0 || accidentCount > 0) {
         const quotePart = repReview ? `\n\n💬 일반 후기 내용: "${repReview.length > 80 ? repReview.slice(0, 80) + "..." : repReview}"` : "";
-        const accidentPart = accidentCount > 0
-          ? `\n\n🚨 CS 사고접수 상세 (${accidentCount}건): ${accidentDetailsList.length > 0 ? accidentDetailsList.map(d => `[${d.length > 60 ? d.slice(0, 60) + "..." : d}]`).join(" ") : "품질/배송 관련 클레임 접수됨"}`
-          : "";
-        desc = `이번 분석 기간 중 '${product}' 상품에서 ${issuesStr} 관련 피드백이 집중 접수되었습니다. 출고 전 검수 방식을 정비하고 즉각 조치할 필요가 있습니다.${accidentPart}${quotePart}`;
+        desc = `이번 분석 기간 중 '${product}' 상품에서 ${issuesStr} 관련 피드백이 집중 접수되었습니다. 출고 전 검수 방식을 정비하고 즉각 조치할 필요가 있습니다.${quotePart}`;
       } else {
         desc = `'${product}' 상품은 이번 분석 기간 동안 비추천 및 사고접수 피드백 없이 균일한 만족도를 기록하고 있습니다. 지속적인 사후 모니터링을 통해 우수한 퀄리티를 유지해 주세요.`;
       }
@@ -196,10 +228,13 @@ export default function ProductStatusTab() {
         notRecommend,
         accidentCount,
         avgRating,
-        recommendRate
+        recommendRate,
+        badgeLabel,
+        accidentBreakdown,
+        accidentDetailsList
       };
     });
-  }, [reviewsData, weeklyAccidentCountsByProduct]);
+  }, [reviewsData, weeklyAccidentCountsByProduct, weeklyAccidentRecordsByProduct]);
 
   // Filter & Sort table data
   const handleSort = (field: keyof ProductStat) => {
@@ -263,15 +298,55 @@ export default function ProductStatusTab() {
                 <div className="flex items-start justify-between">
                   <div>
                     <span className="inline-flex items-center rounded-full bg-red-100 px-3 py-0.5 text-[10px] font-bold text-red-700 uppercase tracking-wide mb-1.5">
-                      품질 경고
+                      {p.badgeLabel}
                     </span>
                     <h4 className="text-base font-black text-slate-900">{p.title}</h4>
                   </div>
                   <AlertTriangle className="h-5 w-5 text-red-500 shrink-0" />
                 </div>
-                
+
                 <p className="text-xs font-bold text-red-600 mt-1">{p.tagline}</p>
-                <p className="text-xs text-slate-500 mt-3 leading-relaxed font-medium">{p.desc}</p>
+                <p className="text-xs text-slate-500 mt-3 leading-relaxed font-medium whitespace-pre-line">{p.desc}</p>
+
+                {p.accidentCount > 0 && (
+                  <div className="mt-3 rounded-xl bg-purple-50/60 border border-purple-100 p-2.5">
+                    <p className="text-[10px] font-bold text-purple-700 mb-1.5">🚨 CS 사고접수 상세 ({p.accidentCount}건)</p>
+                    <div className="flex flex-wrap gap-1 mb-1.5">
+                      {Object.entries(p.accidentBreakdown)
+                        .filter(([, count]) => count > 0)
+                        .map(([category, count]) => (
+                          <span key={category} className="text-[9px] font-bold px-1.5 py-0.5 rounded-md bg-white border border-purple-200 text-purple-600">
+                            {category} {count}
+                          </span>
+                        ))}
+                    </div>
+                    {(expandedAccidentCards[p.id] ? p.accidentDetailsList : p.accidentDetailsList.slice(0, ACCIDENT_QUOTE_PREVIEW_COUNT)).map((detail, i) => (
+                      <p key={i} className="text-[10px] text-slate-500 leading-relaxed">
+                        · {detail.length > 60 ? `${detail.slice(0, 60)}...` : detail}
+                      </p>
+                    ))}
+                    <div className="flex items-center gap-2.5 mt-1.5">
+                      {p.accidentDetailsList.length > ACCIDENT_QUOTE_PREVIEW_COUNT && (
+                        <button
+                          onClick={() => setExpandedAccidentCards(prev => ({ ...prev, [p.id]: !prev[p.id] }))}
+                          className="text-[10px] font-bold text-purple-600 hover:underline cursor-pointer focus:outline-hidden"
+                        >
+                          {expandedAccidentCards[p.id] ? "접기" : `사유 전체 보기 (${p.accidentDetailsList.length})`}
+                        </button>
+                      )}
+                      <button
+                        onClick={() => {
+                          setMetricsProductFilter(p.title);
+                          setMetricsTypeFilter("사고접수");
+                          setActiveTab("metrics");
+                        }}
+                        className="text-[10px] font-bold text-purple-600 hover:underline cursor-pointer focus:outline-hidden"
+                      >
+                        사고접수 탭에서 보기 →
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Product Stats Grid with custom rounded corners */}

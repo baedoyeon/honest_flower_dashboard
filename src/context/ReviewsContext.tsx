@@ -9,6 +9,32 @@ import { defaultCompanyHolidays } from "../data/companyHolidays";
 import { idbLoad, idbSave } from "../utils/idbStorage";
 import { DEFAULT_MONTHLY_CS_LABOR_COST_ALLOCATION_KRW } from "../utils/chatRoomEngine";
 
+// 어드민 사고접수 태깅 대분류(품질/출고/배송) + 기타불만 — ProductStatusTab의 "요주의 위크" 카드
+// 배지/브레이크다운 계산에 쓰인다. classifyCategory(리뷰 텍스트 키워드 매칭용, 품질/상태·배송/포장·
+// 상품구성/양·서비스/시스템 4분류)와는 완전히 다른 축이라 재사용하지 않는다 — 이건 어드민이 직접
+// 사고접수에 태깅한 원인 대분류(accidentDetail의 "품질/시듦" 같은 "대분류/소분류" 표기)다.
+export type AccidentTopCategory = "품질" | "출고" | "배송" | "기타불만";
+
+function classifyAccidentTopCategory(accidentDetail?: string, accidentType?: string): AccidentTopCategory {
+  const detail = (accidentDetail || "").trim();
+  if (detail.includes("/")) {
+    const prefix = detail.split("/")[0].trim();
+    if (prefix === "품질") return "품질";
+    if (prefix === "출고") return "출고";
+    if (prefix === "배송") return "배송";
+  }
+  const type = (accidentType || "").trim();
+  if (type.includes("품질")) return "품질";
+  if (type.includes("누락") || type === "출고") return "출고";
+  if (type.includes("오배송") || type.includes("배송")) return "배송";
+  return "기타불만";
+}
+
+export interface AccidentCategoryRecord {
+  detail: string;
+  topCategory: AccidentTopCategory;
+}
+
 // ActionBoardTab("처리 필요" 탭)과 상단 탭 배지가 함께 쓰는 항목 타입.
 export interface ActionItem {
   key: string;
@@ -33,6 +59,10 @@ interface ReviewsContextType {
   // (OrderItem 조인 불필요 — CSV 자체에 상품명이 이미 들어있음). ProblemForm 데이터가 하나도
   // 없을 때만(하위호환) 옛 Incident 모델로 폴백한다.
   weeklyAccidentCountsByProduct: Record<string, number>;
+  // "요주의 위크" 카드가 사고접수 배지/브레이크다운/대표 인용을 만드는 데 쓰는 원문 레코드.
+  // weeklyAccidentCountsByProduct와 완전히 동일한 소스·기간필터로 계산되어 배열 length가 곧
+  // 해당 상품의 accidentCount와 항상 일치한다(라벨 N건과 실제 나열 개수 불일치 버그 방지).
+  weeklyAccidentRecordsByProduct: Record<string, AccidentCategoryRecord[]>;
   // "처리 필요" 탭(ActionBoardTab)과 상단 탭 배지가 공유하는 대기열. 사고접수는 ProblemForm의
   // status가 "접수중"인 것만(처리완료/반려됨/최종반려됨이 되면 재계산 시 자동으로 목록에서 빠짐 —
   // 수동 처리 버튼 없음), 리뷰는 비추천/저평점이면서 exposed===true인 것만(exposed가 꺼지면 자동
@@ -585,6 +615,38 @@ export function ReviewsProvider({ children }: { children: React.ReactNode }) {
     return counts;
   }, [problemForms, weeklyIncidents, weekFilter, weekRanges]);
 
+  // weeklyAccidentCountsByProduct와 완전히 동일한 필터링(기간·소스·폴백 우선순위)을 그대로 반복해
+  // 레코드 배열을 만든다 — 두 값이 서로 다른 계산 경로를 타면 "라벨 N건"과 "실제 나열 개수"가
+  // 어긋나는 사고가 재발하므로, 절대 별도 로직으로 분리하지 않는다.
+  const weeklyAccidentRecordsByProduct = useMemo(() => {
+    const range = weekFilter === "this" ? weekRanges.thisWeek : weekFilter === "last" ? weekRanges.lastWeek : weekRanges.allPeriod;
+    const records: Record<string, AccidentCategoryRecord[]> = {};
+
+    const push = (product: string, detail?: string, type?: string) => {
+      if (!product) return;
+      if (!records[product]) records[product] = [];
+      records[product].push({
+        detail: (detail && detail.trim()) || (type && type.trim()) || "상세 미기재",
+        topCategory: classifyAccidentTopCategory(detail, type)
+      });
+    };
+
+    if (problemForms.length > 0) {
+      problemForms.forEach(pf => {
+        if (!pf.receivedDate || pf.receivedDate < range.start || pf.receivedDate > range.end) return;
+        const base = (pf.productName || "").split("/")[0].trim();
+        if (!base) return;
+        push(base, pf.accidentDetail, pf.accidentType);
+      });
+      return records;
+    }
+
+    weeklyIncidents.forEach(inc => {
+      push(inc.product, inc.accidentDetail, inc.accidentType);
+    });
+    return records;
+  }, [problemForms, weeklyIncidents, weekFilter, weekRanges]);
+
   // Compute product statistics dynamically from active weeklyReviews & weeklyIncidents!
   const productStats = useMemo(() => {
     const map = new Map<string, {
@@ -684,6 +746,7 @@ export function ReviewsProvider({ children }: { children: React.ReactNode }) {
         summary: r.review || "",
         department: getDepartmentForCategory(r.category),
         targetId: String(r.id),
+        adminLink: `https://server.honestflower.kr/bloom/reviews/review/${r.id}/change/`,
       });
     });
 
@@ -997,6 +1060,7 @@ export function ReviewsProvider({ children }: { children: React.ReactNode }) {
       incidents,
       weeklyIncidents,
       weeklyAccidentCountsByProduct,
+      weeklyAccidentRecordsByProduct,
       actionItems,
       resolveActionItem,
       orderItems,
