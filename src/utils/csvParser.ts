@@ -1632,14 +1632,12 @@ export function parseCSVToDispatchFailure(csvText: string, granularity: "weekly"
 }
 
 // ============================================================================
-// Part F — NPS(전사 순추천고객지수) 요약 파서
+// Part F — NPS(전사 순추천고객지수)
 //
-// ARES III 어드민(/bloom/surveys/netpromoterscore/)은 3.4만 건+ 원본 응답의 "내보내기"만 제공하고,
-// 페이지 상단에 이미 계산된 요약 문구("NPS 78 (total: 34211 / promoters: 28867 / detractors: 2164 /
-// passives: 3180)")를 보여준다. 원본 로우를 프론트에 절대 올리지 않는다는 이번 Part 설계 원칙에 따라,
-// 이 파서는 원본 응답이 아니라 "그 요약 문구를 그대로 복붙"하거나 "total,promoters,passives,detractors
-// 헤더의 한 줄짜리 CSV"만 입력으로 받는다. 두 형식을 모두 지원해서 사용자가 화면에서 보이는 걸 그대로
-// 붙여넣어도 되고, 자동화된 CSV 파이프라인을 나중에 붙여도 되게 한다.
+// ARES III 어드민(/bloom/surveys/netpromoterscore/)이 "내보내기"로 제공하는 건 3.4만 건+ 원본 응답
+// 로우 하나뿐이다(집계 요약 문구는 화면 표시용일 뿐 파일로 못 뽑는다). 그래서 임포터는 원본 CSV 하나만
+// 받고, import 시점에 필요한 모든 집계(누적 요약/Detractor 워치리스트/월별 추이)를 한 번에 계산해
+// state에는 그 소규모 파생값만 남긴다 — 원본 3.4만 건 로우는 파싱이 끝나면 버려진다.
 // ============================================================================
 
 export interface NpsSummary {
@@ -1649,60 +1647,6 @@ export interface NpsSummary {
   detractors: number;
   // 이 요약치가 반영하는 시점 표시용("YYYY.MM.DD") — 업로드 시점에 컨텍스트에서 채워 넣는다.
   asOf?: string;
-}
-
-export interface NpsSummaryParseResult {
-  summary: NpsSummary | null;
-  error?: string;
-}
-
-function extractNpsKeyword(text: string, key: string): number | null {
-  const match = text.match(new RegExp(`${key}s?\\s*[:=]\\s*([\\d,]+)`, "i"));
-  return match ? parseInt(match[1].replace(/,/g, ""), 10) : null;
-}
-
-export function parseNpsSummaryInput(rawText: string): NpsSummaryParseResult {
-  const text = (rawText || "").trim();
-  if (!text) return { summary: null, error: "입력된 내용이 없습니다." };
-
-  // 1) ARES 어드민 요약 문구를 그대로 붙여넣은 경우 — 순서 무관하게 키워드로 각 값을 찾는다.
-  let total = extractNpsKeyword(text, "total");
-  let promoters = extractNpsKeyword(text, "promoter");
-  let passives = extractNpsKeyword(text, "passive");
-  let detractors = extractNpsKeyword(text, "detractor");
-
-  // 2) 키워드 문구로 못 찾았으면 "total,promoters,passives,detractors" 헤더의 1행짜리 CSV로 재시도.
-  if (promoters === null || passives === null || detractors === null) {
-    const rows = parseCSVRows(text);
-    if (rows.length >= 2) {
-      const header = rows[0].map(h => h.trim().toLowerCase());
-      const dataRow = rows[1];
-      const pick = (colName: string): number | null => {
-        const idx = header.indexOf(colName);
-        if (idx === -1 || !dataRow[idx]) return null;
-        const n = parseInt(dataRow[idx].replace(/[^0-9-]/g, ""), 10);
-        return isNaN(n) ? null : n;
-      };
-      total = total ?? pick("total");
-      promoters = promoters ?? pick("promoters");
-      passives = passives ?? pick("passives");
-      detractors = detractors ?? pick("detractors");
-    }
-  }
-
-  if (promoters === null || passives === null || detractors === null) {
-    return {
-      summary: null,
-      error: "promoters/passives/detractors 값을 찾을 수 없습니다. ARES 요약 문구를 그대로 붙여넣거나 \"total,promoters,passives,detractors\" 헤더의 CSV 한 줄을 입력해주세요."
-    };
-  }
-
-  const resolvedTotal = total !== null && total > 0 ? total : promoters + passives + detractors;
-  if (resolvedTotal <= 0) {
-    return { summary: null, error: "total 값이 0이거나 계산할 수 없습니다." };
-  }
-
-  return { summary: { total: resolvedTotal, promoters, passives, detractors } };
 }
 
 // promoterRate/passiveRate/detractorRate는 소수점 첫째자리 %, score는 표준 NPS 정의(프로모터% - 디트랙터%,
@@ -1718,71 +1662,82 @@ export function computeNpsRates(summary: NpsSummary): { promoterRate: number; pa
 }
 
 // ============================================================================
-// Part F 우선순위 1/2/4/5 — NPS 개별 응답 CSV 파서
+// Part F 우선순위 1/2/3/4/5 — NPS 원본 응답 CSV 통합 임포터
 //
-// ARES III "내보내기"는 원본 응답 전체(3.4만 건+)를 그대로 뱉어주는데, 이 파서는 그 파일을 사전
-// 필터링 없이 그대로 받아도 된다 — 업로드된 CSV에 실제로 들어있는 행들만으로 promoter(9~10점)/
-// passive(7~8점)/detractor(0~6점) 건수를 직접 집계해 요약치(summary)를 만들고, 그중 detractor
-// 행만 별도로 추려(detractorRows) 반환한다. 즉 한 번의 업로드로 우선순위 1(누적 NPS 요약)과
-// 우선순위 2/4/5(고액구매 워치리스트·피드백 카테고리 분석·리뷰 미작성 세그먼트)를 동시에 채운다 —
-// "요약 문구 붙여넣기"와 "Detractor CSV 업로드"를 굳이 별개 위젯 두 개로 만들 이유가 없다.
+// ARES III "내보내기"(id, 생성일, 회원/비회원, 이메일, 구매 횟수, 총 구매 비용, 최근 구매 상품,
+// 꽃 취향, 기본 배송지, 점수, 피드백)를 사전 필터링 없이 그대로 받아, 이 함수 하나가 한 번의 훑기로
+// promoter(9~10점)/passive(7~8점)/detractor(0~6점) 집계, Detractor 상세 행, 월별 NPS 추이를 전부
+// 계산한다. "요약 갱신"과 "Detractor 추출"과 "추이 집계"를 별개 업로드로 나눌 이유가 없다 — 셋 다
+// 같은 로우 하나에서 나오는 값이기 때문이다.
 //
-// 성능 원칙과의 관계: "원본 로우를 프론트에 올리지 않는다"는 원칙은 "state/localStorage에 3.4만
-// 건을 계속 들고 있지 않는다"는 뜻이지, "브라우저가 CSV 텍스트를 한 번 파싱하는 것"까지 금지하는
-// 게 아니다 — 이 함수는 업로드 시점에 한 번 전체를 훑고, 실제로 저장되는 건 요약 숫자 4개 +
-// detractor 서브셋(보통 수백~수천 건)뿐이다. 그래도 사용자가 원한다면 이미 detractor만 걸러진
-// 작은 CSV를 올려도 그대로 동작한다(그 경우 summary의 promoters/passives는 0으로 집계되므로,
-// 호출부에서 "이 파일이 전체 응답인지" 확인 체크박스로 summary 반영 여부를 사용자가 직접 결정한다).
+// ⚠️ 점수 공란 처리(중요, 실측으로 확인됨): ARES 어드민 자체가 점수 미기재 응답을 Detractor로
+// 합산한다(0~6점 실응답 + 공란 = 어드민 표시 detractors와 정확히 일치, 공란을 제외하면 NPS 78이
+// 아니라 80으로 어긋남). 그래서 점수 공란 행은 무효 처리(스킵)하지 않고 Detractor로 합산하되,
+// score 필드는 null로 남겨 "실제 0~6점"과 "미기재"를 화면에서 구분할 수 있게 한다. 0~10 범위를
+// 벗어나는 값(오염된 데이터)만 무효로 스킵한다.
+//
+// 성능 원칙: "원본 로우를 프론트에 올리지 않는다"는 "state/localStorage에 3.4만 건을 계속 들고
+// 있지 않는다"는 뜻이지 "브라우저가 CSV 텍스트를 한 번 파싱하는 것"까지 금지하는 게 아니다 — 이
+// 함수는 업로드 시점에 한 번 전체를 훑고, 실제로 저장되는 건 요약 숫자 4개 + detractor 서브셋
+// (보통 수백~수천 건) + 월별 추이(수십 건)뿐이다.
 // ============================================================================
 
 export interface NpsDetractorRow {
-  id: string; // CSV의 ID 컬럼을 우선 쓰고, 없으면 email/고객명+응답일로 합성한 안정적인 키
-  customerName?: string;
+  id: string; // CSV의 ID 컬럼을 우선 쓰고, 없으면 email+응답일로 합성한 안정적인 키
   email?: string;
-  score: number; // 0~6 (파서가 강제)
+  isMember: boolean; // "회원/비회원" 컬럼. 비회원은 이메일이 구조적으로 없어 우선순위 5 매칭 대상에서 제외됨.
+  score: number | null; // 0~6, 또는 점수 공란이었던 경우 null("미기재" — 그래도 Detractor로 합산됨)
   purchaseCount: number;
   totalPurchaseAmount: number;
   lastPurchaseProduct?: string;
   feedback?: string;
-  respondedAt?: string; // CREATED AT 원문 그대로(형식이 CSV마다 다를 수 있어 별도 정규화하지 않음)
+  respondedAt?: string; // 생성일 원문 그대로(형식이 CSV마다 다를 수 있어 별도 정규화하지 않음)
 }
 
-export interface NpsResponsesParseResult {
-  // 업로드된 CSV에 실제로 담긴 행들만으로 집계한 값 — 파일이 진짜 "전체 응답"인지는 파서가 알 수
-  // 없으므로, 이 summary를 npsSummary(누적 NPS 카드)에 반영할지는 호출부(UI)의 사용자 확인에 맡긴다.
+export interface NpsTrendPoint {
+  period: string; // "YYYY-MM" — 생성일 기준 월별 버킷
+  score: number; // 그 기간의 NPS 스코어(정수, -100~100)
+  total: number; // 그 기간 응답 총 건수(툴팁 표시용)
+}
+
+export interface NpsImportResult {
+  // 업로드된 CSV 전체(3.4만 건+)를 그대로 훑어 집계한 값 — ARES 내보내기는 항상 전체 응답이므로
+  // 별도 "이 파일이 전체 응답인지" 확인 없이 바로 누적 NPS 카드에 반영한다.
   summary: NpsSummary;
-  detractorRows: NpsDetractorRow[]; // score 0~6인 행만
+  detractorRows: NpsDetractorRow[]; // score 0~6 또는 공란인 행만(우선순위 2/4/5용)
+  trend: NpsTrendPoint[]; // 생성일 기준 월별 집계(우선순위 3용)
   totalRows: number;
-  validCount: number; // 점수를 정상적으로 읽은 행 수(0~10 범위를 벗어나면 무효 처리)
+  validCount: number; // 유효하게 집계된 행 수(점수가 0~10 범위 밖인 오염 행만 제외)
   missingCriticalColumns: string[];
   isLikelyWrongFileType: boolean;
   detectedColumns: string[];
 }
 
-export function parseCSVToNpsResponses(csvText: string): NpsResponsesParseResult {
+export function parseNpsImportCsv(csvText: string): NpsImportResult {
   const rawRows = parseCSVRows(csvText);
   if (rawRows.length === 0) {
     return {
       summary: { total: 0, promoters: 0, passives: 0, detractors: 0 },
-      detractorRows: [], totalRows: 0, validCount: 0, missingCriticalColumns: [], isLikelyWrongFileType: false, detectedColumns: []
+      detractorRows: [], trend: [], totalRows: 0, validCount: 0,
+      missingCriticalColumns: [], isLikelyWrongFileType: false, detectedColumns: []
     };
   }
 
   const headerRow = rawRows[0].map(h => h.toLowerCase());
 
-  const npsResponseColumnRules: ColumnRule[] = [
+  const npsImportColumnRules: ColumnRule[] = [
     { key: "id", test: isIdColumn },
-    { key: "customerName", test: isReviewerNameColumn },
+    { key: "respondedAt", test: (col) => col.includes("생성일") || col.includes("작성일") || col.includes("created") || col === "date" },
+    { key: "isMember", test: (col) => col.includes("회원") },
     { key: "email", test: (col) => col.includes("이메일") || col.includes("email") },
-    { key: "score", test: (col) => col.includes("점수") || col === "score" || col === "nps" },
     { key: "purchaseCount", test: (col) => col.includes("구매횟수") || col.includes("구매 횟수") || col.replace(/\s|_/g, "").includes("purchasecount") },
     { key: "totalPurchaseAmount", test: (col) => col.includes("총구매") || col.includes("구매비용") || col.includes("구매금액") || col.replace(/\s|_/g, "").includes("totalpurchase") },
     { key: "lastPurchaseProduct", test: (col) => col.includes("최근구매") || col.includes("구매상품") || (col.includes("product") && !col.includes("count")) },
+    { key: "score", test: (col) => col.includes("점수") || col === "score" || col === "nps" },
     { key: "feedback", test: (col) => col.includes("피드백") || col.includes("feedback") || col.includes("의견") },
-    { key: "respondedAt", test: (col) => col.includes("created") || col.includes("응답일") || col.includes("작성일") || col === "date" },
   ];
 
-  const { indices: cols, hasHeader } = detectColumns(headerRow, npsResponseColumnRules);
+  const { indices: cols, hasHeader } = detectColumns(headerRow, npsImportColumnRules);
 
   const { isLikelyWrongFileType, missingCriticalColumns, detectedColumns } = checkSchemaMismatch(hasHeader, cols, [
     { key: "score", label: "점수(score)" },
@@ -1790,38 +1745,56 @@ export function parseCSVToNpsResponses(csvText: string): NpsResponsesParseResult
 
   const dataRows = hasHeader ? rawRows.slice(1) : rawRows;
   const detractorRows: NpsDetractorRow[] = [];
+  const trendMap = new Map<string, { promoters: number; passives: number; detractors: number }>();
   let promoters = 0, passives = 0, detractors = 0, validCount = 0;
   let autoSeq = 1;
 
   dataRows.forEach(row => {
     if (row.length === 0 || (row.length === 1 && !row[0])) return;
 
-    const scoreRaw = cols.score !== -1 && row[cols.score] ? row[cols.score].trim() : "";
-    const score = scoreRaw ? parseInt(scoreRaw.replace(/[^0-9-]/g, ""), 10) : NaN;
-    if (isNaN(score) || score < 0 || score > 10) return; // 표준 NPS 점수 범위(0~10) 밖이면 무효 처리
+    const scoreCell = cols.score !== -1 && row[cols.score] ? row[cols.score].trim() : "";
+    // 점수 공란은 "무효"가 아니라 "미기재 Detractor"다 — 위 주석대로 스킵하면 어드민 숫자와 어긋난다.
+    let score: number | null;
+    if (scoreCell === "") {
+      score = null;
+    } else {
+      const parsed = parseInt(scoreCell.replace(/[^0-9-]/g, ""), 10);
+      if (isNaN(parsed) || parsed < 0 || parsed > 10) return; // 0~10 범위 밖 오염 값만 무효 처리
+      score = parsed;
+    }
     validCount++;
 
-    if (score >= 9) { promoters++; return; }
-    if (score >= 7) { passives++; return; }
+    const respondedAt = cols.respondedAt !== -1 && row[cols.respondedAt] ? row[cols.respondedAt].trim() : undefined;
+    const period = respondedAt ? normalizeDateStr(respondedAt).slice(0, 7).replace(".", "-") : "";
+    const bucket = score !== null && score >= 9 ? "promoters" : score !== null && score >= 7 ? "passives" : "detractors";
 
-    // 0~6점 Detractor만 상세 필드까지 채워서 보관(우선순위 2/4/5용)
+    if (period) {
+      const entry = trendMap.get(period) || { promoters: 0, passives: 0, detractors: 0 };
+      entry[bucket]++;
+      trendMap.set(period, entry);
+    }
+
+    if (bucket === "promoters") { promoters++; return; }
+    if (bucket === "passives") { passives++; return; }
+
+    // Detractor(0~6점 또는 공란)만 상세 필드까지 채워서 보관(우선순위 2/4/5용)
     detractors++;
-    const customerName = cols.customerName !== -1 && row[cols.customerName] ? row[cols.customerName].trim() : "";
+    const memberCell = cols.isMember !== -1 && row[cols.isMember] ? row[cols.isMember].trim() : "";
     const email = cols.email !== -1 && row[cols.email] ? row[cols.email].trim() : "";
+    const isMember = memberCell ? !memberCell.includes("비회원") : Boolean(email);
     const purchaseCountRaw = cols.purchaseCount !== -1 ? row[cols.purchaseCount] : "";
     const purchaseCountNum = purchaseCountRaw ? parseInt(purchaseCountRaw.replace(/[^0-9-]/g, ""), 10) : 0;
     const totalAmountRaw = cols.totalPurchaseAmount !== -1 ? row[cols.totalPurchaseAmount] : "";
     const totalAmountNum = totalAmountRaw ? Math.round(parseFloat(totalAmountRaw.replace(/[^0-9.-]/g, ""))) : 0;
     const lastPurchaseProduct = cols.lastPurchaseProduct !== -1 && row[cols.lastPurchaseProduct] ? row[cols.lastPurchaseProduct].trim() : undefined;
     const feedback = cols.feedback !== -1 && row[cols.feedback] ? row[cols.feedback].trim() : "";
-    const respondedAt = cols.respondedAt !== -1 && row[cols.respondedAt] ? row[cols.respondedAt].trim() : undefined;
     const csvId = cols.id !== -1 && row[cols.id] ? row[cols.id].trim() : "";
-    const id = csvId || `${email || customerName || "row"}_${respondedAt || autoSeq++}`;
+    const id = csvId || `${email || "row"}_${respondedAt || autoSeq++}`;
 
     detractorRows.push({
       id,
-      customerName: customerName || undefined,
       email: email || undefined,
+      isMember,
       score,
       purchaseCount: isNaN(purchaseCountNum) ? 0 : purchaseCountNum,
       totalPurchaseAmount: isNaN(totalAmountNum) ? 0 : totalAmountNum,
@@ -1831,85 +1804,20 @@ export function parseCSVToNpsResponses(csvText: string): NpsResponsesParseResult
     });
   });
 
+  const trend: NpsTrendPoint[] = Array.from(trendMap.entries())
+    .map(([period, counts]) => {
+      const total = counts.promoters + counts.passives + counts.detractors;
+      const score = total > 0 ? Math.round(((counts.promoters - counts.detractors) / total) * 100) : 0;
+      return { period, score, total };
+    })
+    .sort((a, b) => a.period.localeCompare(b.period));
+
   return {
     summary: { total: validCount, promoters, passives, detractors },
     detractorRows,
+    trend,
     totalRows: dataRows.length,
     validCount,
-    missingCriticalColumns,
-    isLikelyWrongFileType,
-    detectedColumns
-  };
-}
-
-// ============================================================================
-// Part F 우선순위 3 — NPS 스코어 추이(월/주별 집계) CSV 파서
-//
-// Part E(발송불가율)와 동일하게, 로우 데이터가 아니라 이미 기간별로 집계된 스코어 하나만 받는다.
-// 컬럼명이 사용자가 직접 짠 고정 쿼리/수기 집계표의 별칭일 가능성이 높아 Part E와 같은 정확매칭을 쓴다.
-// ============================================================================
-
-export interface NpsTrendPoint {
-  period: string; // "YYYY-MM"(월별) 또는 "YYYY-WW"(주별) — granularity로 구분, 값 자체는 자유 형식
-  score: number; // 그 기간의 NPS 스코어(정수, -100~100)
-  total?: number; // 그 기간 응답 총 건수(선택 — 툴팁 표시용)
-}
-
-export interface NpsTrendParseResult {
-  rows: NpsTrendPoint[];
-  totalRows: number;
-  validCount: number;
-  missingCriticalColumns: string[];
-  isLikelyWrongFileType: boolean;
-  detectedColumns: string[];
-}
-
-export function parseCSVToNpsTrend(csvText: string): NpsTrendParseResult {
-  const rawRows = parseCSVRows(csvText);
-  if (rawRows.length === 0) {
-    return { rows: [], totalRows: 0, validCount: 0, missingCriticalColumns: [], isLikelyWrongFileType: false, detectedColumns: [] };
-  }
-
-  const headerRow = rawRows[0].map(h => h.trim().toLowerCase());
-
-  const npsTrendColumnRules: ColumnRule[] = [
-    { key: "period", test: (col) => col === "period" || col === "월" || col === "주" || col.includes("기간") },
-    { key: "score", test: (col) => col === "score" || col === "nps_score" || col.includes("점수") || col === "nps" },
-    { key: "total", test: (col) => col === "total" || col.includes("total") || col.includes("건수") },
-  ];
-
-  const { indices: cols, hasHeader } = detectColumns(headerRow, npsTrendColumnRules);
-
-  const { isLikelyWrongFileType, missingCriticalColumns, detectedColumns } = checkSchemaMismatch(hasHeader, cols, [
-    { key: "period", label: "period(기간)" },
-    { key: "score", label: "score(NPS 스코어)" },
-  ], rawRows[0]);
-
-  const dataRows = hasHeader ? rawRows.slice(1) : rawRows;
-  const rows: NpsTrendPoint[] = [];
-
-  dataRows.forEach(row => {
-    if (row.length === 0 || (row.length === 1 && !row[0])) return;
-
-    const period = cols.period !== -1 && row[cols.period] ? row[cols.period].trim() : "";
-    if (!period) return;
-
-    const scoreRaw = cols.score !== -1 && row[cols.score] ? row[cols.score] : "";
-    const score = scoreRaw ? Math.round(parseFloat(scoreRaw.replace(/[^0-9.-]/g, ""))) : NaN;
-    if (isNaN(score)) return;
-
-    const totalRaw = cols.total !== -1 && row[cols.total] ? row[cols.total] : "";
-    const total = totalRaw ? Math.round(parseFloat(totalRaw.replace(/[^0-9.-]/g, ""))) : undefined;
-
-    rows.push({ period, score, total });
-  });
-
-  rows.sort((a, b) => a.period.localeCompare(b.period));
-
-  return {
-    rows,
-    totalRows: dataRows.length,
-    validCount: rows.length,
     missingCriticalColumns,
     isLikelyWrongFileType,
     detectedColumns

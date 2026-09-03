@@ -2,54 +2,30 @@ import { useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import {
   Users, Upload, X, FileSpreadsheet, Loader2, CheckCircle2, AlertTriangle,
-  Type,
 } from "lucide-react";
 import { useReviews } from "../context/ReviewsContext";
-import {
-  parseCSVToNpsResponses, NpsResponsesParseResult, NpsDetractorRow,
-  parseNpsSummaryInput, computeNpsRates,
-} from "../utils/csvParser";
+import { parseNpsImportCsv, NpsImportResult, NpsDetractorRow, computeNpsRates } from "../utils/csvParser";
 import SchemaMismatchError from "./SchemaMismatchError";
-
-// 리뷰 데이터(Review)엔 이메일 필드가 아예 없다(rawCustomerId/rawReviewer만 존재) — 그래서 "리뷰
-// 미작성" 세그먼트는 이메일이 아니라 이름을 정규화해서 비교하는 근사치일 수밖에 없다. 동명이인/닉네임
-// 표기 차이로 오탐(실제로는 리뷰를 남겼는데 "미작성"으로 잘못 뜨는 경우)이 있을 수 있어, 화면에
-// 반드시 이 한계를 명시한다.
-function normalizeName(name?: string): string {
-  return (name || "").trim().toLowerCase().replace(/\s+/g, "");
-}
 
 function formatWon(n: number): string {
   return `${n.toLocaleString()}원`;
 }
 
-type ViewMode = "highValue" | "noReview";
-type ImportMode = "csv" | "summaryText";
+type ViewMode = "highValue" | "memberList";
 
 export default function NpsWatchlistWidget() {
   const {
-    npsSummary, importNpsSummary,
-    npsDetractorRows, importNpsDetractorRows,
+    npsSummary, npsDetractorRows, applyNpsImport,
     npsContactedIds, toggleNpsContact,
     npsWatchlistThreshold, setNpsWatchlistThreshold,
-    reviews,
   } = useReviews();
 
   const [viewMode, setViewMode] = useState<ViewMode>("highValue");
   const [showModal, setShowModal] = useState(false);
-  // CSV 업로드가 기본 — ARES 내보내기를 사전 필터링 없이 그대로 올려도 파서가 알아서 promoter/
-  // passive/detractor를 나눠준다(요약 갱신 + Detractor 워치리스트 추출을 한 번에). "요약 문구만
-  // 빠르게"는 CSV 없이 화면에 보이는 요약 문장만 눈으로 복사해 누적 NPS 카드만 급히 갱신하고 싶을
-  // 때 쓰는 보조 경로 — Detractor 워치리스트는 갱신되지 않는다.
-  const [importMode, setImportMode] = useState<ImportMode>("csv");
   const [activeImportTab, setActiveImportTab] = useState<"file" | "paste">("file");
   const [csvRawText, setCsvRawText] = useState("");
   const [isParsingCSV, setIsParsingCSV] = useState(false);
-  const [parsedResult, setParsedResult] = useState<NpsResponsesParseResult | null>(null);
-  const [applySummary, setApplySummary] = useState(true);
-  const [summaryText, setSummaryText] = useState("");
-  const [summaryError, setSummaryError] = useState<string | null>(null);
-  const [summaryPreview, setSummaryPreview] = useState<ReturnType<typeof parseNpsSummaryInput>["summary"] | null>(null);
+  const [parsedResult, setParsedResult] = useState<NpsImportResult | null>(null);
   const [importSuccessMsg, setImportSuccessMsg] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -57,9 +33,6 @@ export default function NpsWatchlistWidget() {
   const resetModalState = () => {
     setParsedResult(null);
     setCsvRawText("");
-    setSummaryText("");
-    setSummaryPreview(null);
-    setSummaryError(null);
   };
 
   const handleFileProcess = (file: File) => {
@@ -68,7 +41,7 @@ export default function NpsWatchlistWidget() {
     const reader = new FileReader();
     reader.onload = (event) => {
       try {
-        setParsedResult(parseCSVToNpsResponses(event.target?.result as string));
+        setParsedResult(parseNpsImportCsv(event.target?.result as string));
       } catch (err) {
         alert("CSV 파싱 중 오류가 발생했습니다: " + (err as Error).message);
       } finally {
@@ -83,7 +56,7 @@ export default function NpsWatchlistWidget() {
     if (!csvRawText.trim()) return;
     setIsParsingCSV(true);
     try {
-      setParsedResult(parseCSVToNpsResponses(csvRawText));
+      setParsedResult(parseNpsImportCsv(csvRawText));
     } catch (err) {
       alert("CSV 텍스트 파싱 오류: " + (err as Error).message);
     } finally {
@@ -91,73 +64,46 @@ export default function NpsWatchlistWidget() {
     }
   };
 
-  const handleApplyCsv = () => {
+  const handleApply = () => {
     if (!parsedResult) return;
-    importNpsDetractorRows(parsedResult.detractorRows);
-    if (applySummary) importNpsSummary(parsedResult.summary);
+    applyNpsImport(parsedResult);
     setImportSuccessMsg(
-      applySummary
-        ? `NPS 응답 ${parsedResult.validCount}건 반영 — 누적 NPS 요약과 Detractor ${parsedResult.detractorRows.length}건이 함께 갱신되었습니다!`
-        : `Detractor ${parsedResult.detractorRows.length}건이 반영되었습니다(누적 NPS 요약은 갱신하지 않음).`
+      `NPS 응답 ${parsedResult.validCount.toLocaleString()}건 반영 — 누적 NPS 요약, Detractor ${parsedResult.detractorRows.length.toLocaleString()}건, 월별 추이 ${parsedResult.trend.length}개월치가 함께 갱신되었습니다!`
     );
     setTimeout(() => {
       resetModalState();
       setShowModal(false);
       setImportSuccessMsg(null);
-    }, 2200);
+    }, 2400);
   };
 
-  const handleSummaryParse = () => {
-    if (!summaryText.trim()) return;
-    setSummaryError(null);
-    setSummaryPreview(null);
-    const result = parseNpsSummaryInput(summaryText);
-    if (result.summary) setSummaryPreview(result.summary);
-    else setSummaryError(result.error || "값을 인식하지 못했습니다.");
-  };
-
-  const handleApplySummary = () => {
-    if (!summaryPreview) return;
-    importNpsSummary(summaryPreview);
-    setImportSuccessMsg(`누적 NPS 요약치가 반영되었습니다! (total ${summaryPreview.total.toLocaleString()}건)`);
-    setTimeout(() => {
-      resetModalState();
-      setShowModal(false);
-      setImportSuccessMsg(null);
-    }, 1800);
-  };
-
-  // 우선순위 2 — 구매횟수 임계값 이상인 Detractor를 총구매비용 내림차순으로.
+  // 우선순위 2 — 구매횟수 임계값 이상인 Detractor를 총구매비용 내림차순으로. npsDetractorRows는
+  // 파서 단계에서 이미 Detractor(0~6점 또는 점수 공란) 버킷만 담고 있으므로 점수 재필터링은 불필요.
   const highValueList = useMemo(() => {
     return npsDetractorRows
       .filter(r => r.purchaseCount >= npsWatchlistThreshold)
       .sort((a, b) => b.totalPurchaseAmount - a.totalPurchaseAmount);
   }, [npsDetractorRows, npsWatchlistThreshold]);
 
-  // 우선순위 5 — 리뷰 미작성 + NPS 저점수 교차. 이메일 조인 불가 → 이름 정규화 근사 매칭.
-  const reviewedNameSet = useMemo(() => {
-    const set = new Set<string>();
-    reviews.forEach(r => {
-      const n1 = normalizeName(r.reviewer);
-      const n2 = normalizeName(r.rawReviewer);
-      if (n1) set.add(n1);
-      if (n2) set.add(n2);
+  // 우선순위 5 — 원래 "리뷰 미작성 교차세그먼트"(이메일 기준 매칭)를 스펙했으나, 실제 데이터 확인
+  // 결과 NPS 원본 CSV엔 이메일만 있고 이름이 없고, 리뷰 데이터엔 고객ID/이름만 있고 이메일이 없어
+  // 두 소스 간 공통 식별자가 존재하지 않는다(구조적 제약, 사용자 확인 후 기능 축소 결정). 그래서
+  // "리뷰 미작성"이라는 특정 매칭 대신, 회원 Detractor 응답을 이메일 기준 dedup(최신 응답 1건만)한
+  // 참고용 전체 목록만 제공한다 — 비회원(전체의 약 42.8%)은 이메일이 없어 원천적으로 제외된다.
+  const memberDedupedList = useMemo(() => {
+    const latestByEmail = new Map<string, NpsDetractorRow>();
+    npsDetractorRows.forEach(r => {
+      if (!r.isMember || !r.email) return;
+      const existing = latestByEmail.get(r.email);
+      if (!existing || (r.respondedAt || "") > (existing.respondedAt || "")) {
+        latestByEmail.set(r.email, r);
+      }
     });
-    return set;
-  }, [reviews]);
+    return Array.from(latestByEmail.values()).sort((a, b) => b.totalPurchaseAmount - a.totalPurchaseAmount);
+  }, [npsDetractorRows]);
 
-  const noReviewList = useMemo(() => {
-    return npsDetractorRows
-      .filter(r => {
-        const n = normalizeName(r.customerName);
-        return n.length > 0 && !reviewedNameSet.has(n);
-      })
-      .sort((a, b) => a.score - b.score || b.totalPurchaseAmount - a.totalPurchaseAmount);
-  }, [npsDetractorRows, reviewedNameSet]);
-
-  const activeList = viewMode === "highValue" ? highValueList : noReviewList;
+  const activeList = viewMode === "highValue" ? highValueList : memberDedupedList;
   const previewRates = parsedResult ? computeNpsRates(parsedResult.summary) : null;
-  const summaryPreviewRates = summaryPreview ? computeNpsRates(summaryPreview) : null;
 
   return (
     <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm space-y-4">
@@ -167,7 +113,7 @@ export default function NpsWatchlistWidget() {
           <div>
             <h3 className="text-sm font-bold text-slate-900">NPS Detractor 이탈 위험군 추적</h3>
             <p className="text-[11px] text-slate-400 mt-0.5">
-              NPS 응답 CSV를 사전 필터링 없이 그대로 올리면 누적 NPS 요약과 Detractor(0~6점) 워치리스트가 한 번에 갱신됩니다.
+              ARES III NPS 원본 응답 CSV를 사전 필터링 없이 그대로 올리면 누적 NPS 요약, Detractor 워치리스트, 월별 추이가 한 번에 갱신됩니다.
               {npsSummary.asOf && <span> 현재 누적 NPS 기준일: {npsSummary.asOf}</span>}
             </p>
           </div>
@@ -177,7 +123,7 @@ export default function NpsWatchlistWidget() {
           className="inline-flex items-center gap-1.5 px-4 py-2 rounded-2xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold transition shadow-xs cursor-pointer shrink-0"
         >
           <Upload className="h-4 w-4" />
-          <span>NPS 응답 업데이트</span>
+          <span>NPS 응답 CSV 업데이트</span>
         </button>
       </div>
 
@@ -193,7 +139,7 @@ export default function NpsWatchlistWidget() {
               <div className="flex items-center justify-between border-b border-rose-100 pb-3">
                 <div className="flex items-center gap-2">
                   <FileSpreadsheet className="h-4 w-4 text-rose-600" />
-                  <h4 className="text-xs font-bold text-slate-900">NPS 응답 업데이트</h4>
+                  <h4 className="text-xs font-bold text-slate-900">NPS 응답 CSV 업데이트</h4>
                 </div>
                 <button
                   onClick={() => { setShowModal(false); resetModalState(); }}
@@ -203,208 +149,124 @@ export default function NpsWatchlistWidget() {
                 </button>
               </div>
 
+              <p className="text-[11px] text-slate-500 leading-relaxed">
+                ARES III → 서베이 → NPS의 <span className="font-bold">"내보내기"를 사전 필터링 없이 그대로</span> 올려주세요. 이 파서가 점수(0~10, 공란 포함)를 직접 세어 promoter/passive/detractor를 나누고(점수 공란은 어드민과 동일하게 Detractor로 합산됩니다), 월별 NPS 추이까지 한 번에 계산합니다. 지원 열: id(선택), 생성일, 회원/비회원, 이메일, 구매 횟수, 총 구매 비용, 최근 구매 상품, 점수, 피드백.
+              </p>
+
               <div className="flex items-center gap-2">
                 <button
-                  onClick={() => setImportMode("csv")}
+                  onClick={() => setActiveImportTab("file")}
                   className={`px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
-                    importMode === "csv" ? "bg-rose-600 text-white shadow-2xs" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                    activeImportTab === "file" ? "bg-slate-800 text-white shadow-2xs" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
                   }`}
                 >
-                  NPS 응답 CSV 업로드
+                  파일 업로드 (.csv)
                 </button>
                 <button
-                  onClick={() => setImportMode("summaryText")}
+                  onClick={() => setActiveImportTab("paste")}
                   className={`px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
-                    importMode === "summaryText" ? "bg-rose-600 text-white shadow-2xs" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                    activeImportTab === "paste" ? "bg-slate-800 text-white shadow-2xs" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
                   }`}
                 >
-                  요약 문구만 빠르게 (누적 NPS만 갱신)
+                  CSV 텍스트 직접 붙여넣기
                 </button>
               </div>
 
-              {importMode === "csv" && (
-                <>
-                  <p className="text-[11px] text-slate-500 leading-relaxed">
-                    ARES III → 서베이 → NPS의 <span className="font-bold">"내보내기"를 사전 필터링 없이 그대로</span> 올려주세요. 이 파서가 점수(0~10)를 직접 세어 promoter/passive/detractor를 나누므로 미리 걸러서 올릴 필요가 없습니다. 지원 열: ID(선택), 고객명, 이메일, 점수, 구매횟수, 총구매비용, 최근구매상품, 피드백, CREATED AT.
-                  </p>
-
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => setActiveImportTab("file")}
-                      className={`px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
-                        activeImportTab === "file" ? "bg-slate-800 text-white shadow-2xs" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                      }`}
-                    >
-                      파일 업로드 (.csv)
-                    </button>
-                    <button
-                      onClick={() => setActiveImportTab("paste")}
-                      className={`px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
-                        activeImportTab === "paste" ? "bg-slate-800 text-white shadow-2xs" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                      }`}
-                    >
-                      CSV 텍스트 직접 붙여넣기
-                    </button>
+              {activeImportTab === "file" && (
+                <div
+                  onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+                  onDragLeave={() => setIsDragging(false)}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    setIsDragging(false);
+                    if (e.dataTransfer.files?.[0]) handleFileProcess(e.dataTransfer.files[0]);
+                  }}
+                  onClick={() => fileInputRef.current?.click()}
+                  className={`border-2 border-dashed rounded-2xl p-8 text-center cursor-pointer transition ${
+                    isDragging ? "border-rose-500 bg-rose-50/50" : "border-slate-200 bg-slate-50/50 hover:border-rose-400 hover:bg-rose-50/20"
+                  }`}
+                >
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".csv,text/csv"
+                    className="hidden"
+                    onChange={(e) => { if (e.target.files?.[0]) handleFileProcess(e.target.files[0]); }}
+                  />
+                  <div className="flex flex-col items-center gap-2">
+                    <div className="rounded-full p-3 bg-rose-100 text-rose-700">
+                      <Upload className="h-6 w-6" />
+                    </div>
+                    <p className="text-xs font-bold text-slate-800">CSV 파일을 드래그하여 놓거나 클릭하여 업로드</p>
                   </div>
-
-                  {activeImportTab === "file" && (
-                    <div
-                      onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
-                      onDragLeave={() => setIsDragging(false)}
-                      onDrop={(e) => {
-                        e.preventDefault();
-                        setIsDragging(false);
-                        if (e.dataTransfer.files?.[0]) handleFileProcess(e.dataTransfer.files[0]);
-                      }}
-                      onClick={() => fileInputRef.current?.click()}
-                      className={`border-2 border-dashed rounded-2xl p-8 text-center cursor-pointer transition ${
-                        isDragging ? "border-rose-500 bg-rose-50/50" : "border-slate-200 bg-slate-50/50 hover:border-rose-400 hover:bg-rose-50/20"
-                      }`}
-                    >
-                      <input
-                        ref={fileInputRef}
-                        type="file"
-                        accept=".csv,text/csv"
-                        className="hidden"
-                        onChange={(e) => { if (e.target.files?.[0]) handleFileProcess(e.target.files[0]); }}
-                      />
-                      <div className="flex flex-col items-center gap-2">
-                        <div className="rounded-full p-3 bg-rose-100 text-rose-700">
-                          <Upload className="h-6 w-6" />
-                        </div>
-                        <p className="text-xs font-bold text-slate-800">CSV 파일을 드래그하여 놓거나 클릭하여 업로드</p>
-                      </div>
-                    </div>
-                  )}
-
-                  {activeImportTab === "paste" && (
-                    <div className="space-y-3">
-                      <textarea
-                        rows={5}
-                        value={csvRawText}
-                        onChange={(e) => setCsvRawText(e.target.value)}
-                        placeholder={"id,고객명,이메일,점수,구매횟수,총구매비용,최근구매상품,피드백,created at\n1,홍길동,hong@example.com,3,8,1250000,테디베어 해바라기,\"꽃이 자주 시들어와요\",2026-08-20\n2,김영희,kim@example.com,9,10,900000,장미 부케,\"아주 좋아요\",2026-08-21"}
-                        className="w-full rounded-2xl border border-slate-200 bg-slate-50/40 p-4 text-xs font-mono text-slate-800 placeholder-slate-400 focus:outline-hidden focus:ring-2 focus:ring-rose-500"
-                      />
-                      <div className="flex justify-end">
-                        <button
-                          onClick={handleTextParse}
-                          disabled={isParsingCSV || !csvRawText.trim()}
-                          className="inline-flex items-center gap-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white px-5 py-2 text-xs font-bold transition shadow-xs cursor-pointer disabled:opacity-50"
-                        >
-                          {isParsingCSV ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
-                          <span>텍스트 파싱 및 검증</span>
-                        </button>
-                      </div>
-                    </div>
-                  )}
-
-                  {parsedResult && (
-                    <div className="rounded-2xl border border-rose-200 bg-rose-50/20 p-5 space-y-4">
-                      <div className="flex items-center gap-2 border-b border-rose-100 pb-3">
-                        <CheckCircle2 className="h-5 w-5 text-emerald-600" />
-                        <h5 className="text-sm font-bold text-slate-900">
-                          파싱 검증 완료: 총 <span className="text-rose-700 font-extrabold">{parsedResult.validCount}</span>건 응답
-                        </h5>
-                      </div>
-
-                      {parsedResult.isLikelyWrongFileType ? (
-                        <SchemaMismatchError
-                          detectedColumns={parsedResult.detectedColumns}
-                          guidance="ARES III NPS 응답 내보내기 CSV가 맞는지 확인해주세요."
-                        />
-                      ) : parsedResult.missingCriticalColumns.length > 0 && (
-                        <div className="rounded-xl border border-amber-300 bg-amber-50 p-3.5 flex items-start gap-2.5">
-                          <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
-                          <p className="text-xs text-amber-900 leading-relaxed">
-                            <span className="font-bold">다음 필수 컬럼을 인식하지 못했습니다: {parsedResult.missingCriticalColumns.join(", ")}.</span>{" "}
-                            CSV 헤더명을 확인해주세요.
-                          </p>
-                        </div>
-                      )}
-
-                      {previewRates && (
-                        <div className="grid grid-cols-4 gap-1.5 text-center bg-white rounded-xl border border-rose-100 p-3">
-                          <div><p className="text-[9px] text-slate-400 font-bold">NPS</p><p className="text-sm font-black text-slate-800">{previewRates.score}</p></div>
-                          <div><p className="text-[9px] text-slate-400 font-bold">Promoter</p><p className="text-sm font-black text-slate-800">{parsedResult.summary.promoters}</p></div>
-                          <div><p className="text-[9px] text-slate-400 font-bold">Passive</p><p className="text-sm font-black text-slate-800">{parsedResult.summary.passives}</p></div>
-                          <div><p className="text-[9px] text-slate-400 font-bold">Detractor</p><p className="text-sm font-black text-rose-600">{parsedResult.summary.detractors}</p></div>
-                        </div>
-                      )}
-
-                      <label className="flex items-start gap-2 text-xs text-slate-700 bg-white rounded-xl border border-rose-100 p-3 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={applySummary}
-                          onChange={(e) => setApplySummary(e.target.checked)}
-                          className="mt-0.5 text-rose-600 focus:ring-rose-500"
-                        />
-                        <span>
-                          <span className="font-bold">이 CSV는 전체 응답입니다</span> — 위 promoter/passive/detractor 건수로 누적 NPS 요약 카드도 함께 갱신합니다.
-                          이미 0~6점만 걸러서 올리신 파일이라면 체크를 해제해주세요(그러면 Detractor 워치리스트만 갱신되고 누적 NPS는 그대로 유지됩니다).
-                        </span>
-                      </label>
-
-                      <div className="flex items-center justify-between pt-2">
-                        <button onClick={() => setParsedResult(null)} className="text-xs text-slate-400 hover:text-slate-600 font-bold px-3 py-2 rounded-xl transition cursor-pointer">취소</button>
-                        <button
-                          onClick={handleApplyCsv}
-                          className="inline-flex items-center gap-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white px-6 py-2.5 text-xs font-bold transition shadow-xs cursor-pointer"
-                        >
-                          <CheckCircle2 className="h-4 w-4" />
-                          <span>반영</span>
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </>
+                </div>
               )}
 
-              {importMode === "summaryText" && (
+              {activeImportTab === "paste" && (
                 <div className="space-y-3">
-                  <p className="text-[11px] text-slate-500 leading-relaxed flex items-start gap-1.5">
-                    <Type className="h-3.5 w-3.5 shrink-0 mt-0.5" />
-                    <span>CSV 없이 ARES 화면 상단의 요약 문구만 복붙해 누적 NPS 카드만 빠르게 갱신합니다. Detractor 워치리스트는 갱신되지 않습니다.</span>
-                  </p>
                   <textarea
-                    rows={3}
-                    value={summaryText}
-                    onChange={(e) => setSummaryText(e.target.value)}
-                    placeholder="NPS 78 (total: 34,211 / promoters: 28,867 / detractors: 2,164 / passives: 3,180)"
+                    rows={5}
+                    value={csvRawText}
+                    onChange={(e) => setCsvRawText(e.target.value)}
+                    placeholder={"id,생성일,회원/비회원,이메일,구매 횟수,총 구매 비용,최근 구매 상품,꽃 취향,기본 배송지,점수,피드백\n1,2026-08-20,회원,hong@example.com,8,1250000,테디베어 해바라기,파스텔,서울시 강남구,3,\"꽃이 자주 시들어와요\"\n2,2026-08-21,비회원,,1,90000,장미 부케,비비드,,,\n"}
                     className="w-full rounded-2xl border border-slate-200 bg-slate-50/40 p-4 text-xs font-mono text-slate-800 placeholder-slate-400 focus:outline-hidden focus:ring-2 focus:ring-rose-500"
                   />
                   <div className="flex justify-end">
                     <button
-                      onClick={handleSummaryParse}
-                      disabled={!summaryText.trim()}
-                      className="inline-flex items-center gap-2 rounded-xl bg-slate-800 hover:bg-slate-900 text-white px-5 py-2 text-xs font-bold transition shadow-xs cursor-pointer disabled:opacity-50"
+                      onClick={handleTextParse}
+                      disabled={isParsingCSV || !csvRawText.trim()}
+                      className="inline-flex items-center gap-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white px-5 py-2 text-xs font-bold transition shadow-xs cursor-pointer disabled:opacity-50"
                     >
-                      <CheckCircle2 className="h-4 w-4" />
-                      <span>확인</span>
+                      {isParsingCSV ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+                      <span>텍스트 파싱 및 검증</span>
                     </button>
                   </div>
+                </div>
+              )}
 
-                  {summaryError && (
-                    <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 flex items-start gap-2">
-                      <AlertTriangle className="h-3.5 w-3.5 text-amber-600 shrink-0 mt-0.5" />
-                      <p className="text-[11px] text-amber-900 leading-relaxed">{summaryError}</p>
+              {parsedResult && (
+                <div className="rounded-2xl border border-rose-200 bg-rose-50/20 p-5 space-y-4">
+                  <div className="flex items-center gap-2 border-b border-rose-100 pb-3">
+                    <CheckCircle2 className="h-5 w-5 text-emerald-600" />
+                    <h5 className="text-sm font-bold text-slate-900">
+                      파싱 검증 완료: 총 <span className="text-rose-700 font-extrabold">{parsedResult.validCount.toLocaleString()}</span>건 응답
+                    </h5>
+                  </div>
+
+                  {parsedResult.isLikelyWrongFileType ? (
+                    <SchemaMismatchError
+                      detectedColumns={parsedResult.detectedColumns}
+                      guidance="ARES III NPS 응답 내보내기 CSV가 맞는지 확인해주세요."
+                    />
+                  ) : parsedResult.missingCriticalColumns.length > 0 && (
+                    <div className="rounded-xl border border-amber-300 bg-amber-50 p-3.5 flex items-start gap-2.5">
+                      <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+                      <p className="text-xs text-amber-900 leading-relaxed">
+                        <span className="font-bold">다음 필수 컬럼을 인식하지 못했습니다: {parsedResult.missingCriticalColumns.join(", ")}.</span>{" "}
+                        CSV 헤더명을 확인해주세요.
+                      </p>
                     </div>
                   )}
 
-                  {summaryPreview && summaryPreviewRates && (
-                    <div className="rounded-xl border border-rose-100 bg-rose-50/20 p-3 space-y-2">
-                      <p className="text-[11px] font-bold text-slate-700">NPS {summaryPreviewRates.score} · total {summaryPreview.total.toLocaleString()}건</p>
-                      <div className="flex justify-end">
-                        <button
-                          onClick={handleApplySummary}
-                          className="inline-flex items-center gap-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white px-4 py-1.5 text-[11px] font-bold transition cursor-pointer"
-                        >
-                          <CheckCircle2 className="h-3.5 w-3.5" />
-                          <span>반영</span>
-                        </button>
-                      </div>
+                  {previewRates && (
+                    <div className="grid grid-cols-4 gap-1.5 text-center bg-white rounded-xl border border-rose-100 p-3">
+                      <div><p className="text-[9px] text-slate-400 font-bold">NPS</p><p className="text-sm font-black text-slate-800">{previewRates.score}</p></div>
+                      <div><p className="text-[9px] text-slate-400 font-bold">Promoter</p><p className="text-sm font-black text-slate-800">{parsedResult.summary.promoters.toLocaleString()}</p></div>
+                      <div><p className="text-[9px] text-slate-400 font-bold">Passive</p><p className="text-sm font-black text-slate-800">{parsedResult.summary.passives.toLocaleString()}</p></div>
+                      <div><p className="text-[9px] text-slate-400 font-bold">Detractor</p><p className="text-sm font-black text-rose-600">{parsedResult.summary.detractors.toLocaleString()}</p></div>
                     </div>
                   )}
+
+                  <div className="flex items-center justify-between pt-2">
+                    <button onClick={() => setParsedResult(null)} className="text-xs text-slate-400 hover:text-slate-600 font-bold px-3 py-2 rounded-xl transition cursor-pointer">취소</button>
+                    <button
+                      onClick={handleApply}
+                      className="inline-flex items-center gap-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white px-6 py-2.5 text-xs font-bold transition shadow-xs cursor-pointer"
+                    >
+                      <CheckCircle2 className="h-4 w-4" />
+                      <span>반영</span>
+                    </button>
+                  </div>
                 </div>
               )}
 
@@ -437,12 +299,12 @@ export default function NpsWatchlistWidget() {
                 고액구매 이탈위험 ({highValueList.length})
               </button>
               <button
-                onClick={() => setViewMode("noReview")}
+                onClick={() => setViewMode("memberList")}
                 className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${
-                  viewMode === "noReview" ? "bg-rose-600 text-white shadow-2xs" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                  viewMode === "memberList" ? "bg-rose-600 text-white shadow-2xs" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
                 }`}
               >
-                리뷰 미작성 세그먼트 ({noReviewList.length})
+                회원 Detractor 전체 ({memberDedupedList.length})
               </button>
             </div>
 
@@ -461,11 +323,11 @@ export default function NpsWatchlistWidget() {
             )}
           </div>
 
-          {viewMode === "noReview" && (
+          {viewMode === "memberList" && (
             <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-3 flex items-start gap-2">
               <AlertTriangle className="h-3.5 w-3.5 text-amber-600 shrink-0 mt-0.5" />
               <p className="text-[11px] text-amber-900 leading-relaxed">
-                리뷰 데이터에 이메일 필드가 없어(rawCustomerId만 존재) <span className="font-bold">고객명 정규화 일치</span>로만 판별한 근사치입니다. 동명이인·닉네임 표기 차이로 오탐이 있을 수 있으니 참고용으로만 활용해주세요.
+                원래 "리뷰 미작성" 교차 매칭을 목표했으나, NPS 응답엔 이메일만 있고 리뷰 데이터엔 고객ID/이름만 있어 두 소스 간 공통 식별자가 없습니다(구조적 제약). 그래서 <span className="font-bold">회원 응답만</span>(비회원은 이메일이 없어 제외) 이메일 기준 dedup(동일 이메일은 최신 응답 1건만) 처리한 참고용 전체 목록입니다 — 리뷰 작성 여부와는 무관합니다.
               </p>
             </div>
           )}
@@ -474,7 +336,7 @@ export default function NpsWatchlistWidget() {
             <table className="min-w-full divide-y divide-slate-100 text-xs">
               <thead className="bg-slate-50">
                 <tr>
-                  <th className="px-3 py-2.5 text-left font-bold text-slate-500">고객</th>
+                  <th className="px-3 py-2.5 text-left font-bold text-slate-500">이메일</th>
                   <th className="px-3 py-2.5 text-center font-bold text-slate-500">점수</th>
                   <th className="px-3 py-2.5 text-center font-bold text-slate-500">구매횟수</th>
                   <th className="px-3 py-2.5 text-right font-bold text-slate-500">총구매비용</th>
@@ -492,10 +354,10 @@ export default function NpsWatchlistWidget() {
                   return (
                     <tr key={row.id} className={isContacted ? "bg-slate-50/40" : ""}>
                       <td className="px-3 py-2.5">
-                        <p className="font-bold text-slate-800">{row.customerName || "이름 없음"}</p>
-                        <p className="text-[10px] text-slate-400">{row.email || "-"}</p>
+                        <p className="font-bold text-slate-800">{row.email || "이메일 없음"}</p>
+                        <p className="text-[10px] text-slate-400">{row.isMember ? "회원" : "비회원"}</p>
                       </td>
-                      <td className="px-3 py-2.5 text-center font-black text-rose-600">{row.score}</td>
+                      <td className="px-3 py-2.5 text-center font-black text-rose-600">{row.score === null ? "미기재" : row.score}</td>
                       <td className="px-3 py-2.5 text-center font-bold text-slate-700">{row.purchaseCount}회</td>
                       <td className="px-3 py-2.5 text-right font-bold text-slate-700">{formatWon(row.totalPurchaseAmount)}</td>
                       <td className="px-3 py-2.5 text-slate-600 max-w-[140px] truncate">{row.lastPurchaseProduct || "-"}</td>

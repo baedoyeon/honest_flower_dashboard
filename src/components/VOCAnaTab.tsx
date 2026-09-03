@@ -36,10 +36,11 @@ export default function VOCAnaTab() {
     }));
   }, [reviewsData]);
 
-  // Part F 우선순위 4 — NPS Detractor(0~6점) 피드백을 기존 VOC 대분류(품질/상태·배송/포장·
-  // 상품구성/양·서비스/시스템) 기준으로 재사용해 사유별 빈도를 집계한다. classifyCategory는 이미
-  // 리뷰 CSV 파싱에도 쓰이는 동일 함수라 리뷰 VOC와 같은 잣대로 비교 가능하다. 표준 NPS 정의대로
-  // 0~6점을 전부 Detractor로 취급하고(5~6점도 별도로 빼지 않음), 피드백 텍스트가 없는 응답은 제외한다.
+  // Part F 우선순위 4 — NPS Detractor(0~6점 또는 점수 공란) 피드백을 기존 VOC 대분류(품질/상태·
+  // 배송/포장·상품구성/양·서비스/시스템) 기준으로 재사용해 사유별 빈도를 집계한다. classifyCategory는
+  // 이미 리뷰 CSV 파싱에도 쓰이는 동일 함수라 리뷰 VOC와 같은 잣대로 비교 가능하다. 실측 기준 Detractor
+  // 중 피드백 텍스트가 채워진 비율이 낮으므로(약 19%), 텍스트 없는 응답은 억지로 카테고리에 넣지 않고
+  // "사유 미기재"로 별도 카운트만 남긴다 — 채움률 자체를 화면에 명시하는 게 스펙 요건이다.
   const detractorCategoryStats = useMemo(() => {
     const categories = ["품질/상태", "배송/포장", "상품구성/양", "서비스/시스템"] as const;
     const counts: Record<string, number> = { "품질/상태": 0, "배송/포장": 0, "상품구성/양": 0, "서비스/시스템": 0 };
@@ -55,8 +56,12 @@ export default function VOCAnaTab() {
       if (samples[key].length < 2) samples[key].push(r.feedback!);
     });
 
+    const detractorTotal = npsDetractorRows.length;
     return {
       total: withFeedback,
+      detractorTotal,
+      noFeedbackCount: detractorTotal - withFeedback,
+      fillRate: detractorTotal > 0 ? Math.round((withFeedback / detractorTotal) * 1000) / 10 : 0,
       breakdown: categories.map(cat => ({ name: cat, count: counts[cat], samples: samples[cat] })).sort((a, b) => b.count - a.count)
     };
   }, [npsDetractorRows]);
@@ -289,7 +294,7 @@ export default function VOCAnaTab() {
               </div>
             </div>
 
-            {detractorCategoryStats.total === 0 ? (
+            {detractorCategoryStats.detractorTotal === 0 ? (
               <div className="text-center py-10 space-y-3">
                 <ThumbsDown className="h-8 w-8 text-slate-300 mx-auto" />
                 <p className="text-xs text-slate-400">아직 업로드된 NPS Detractor 피드백이 없습니다.</p>
@@ -302,22 +307,36 @@ export default function VOCAnaTab() {
                 </button>
               </div>
             ) : (
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                {detractorCategoryStats.breakdown.map((item) => {
-                  const pct = detractorCategoryStats.total > 0 ? Math.round((item.count / detractorCategoryStats.total) * 100) : 0;
-                  return (
-                    <div key={item.name} className="rounded-2xl border border-rose-100 bg-rose-50/20 p-4 space-y-2">
-                      <div className="flex items-baseline justify-between">
-                        <p className="text-xs font-bold text-slate-800">{item.name}</p>
-                        <p className="text-lg font-black text-rose-700">{item.count}<span className="text-[10px] font-bold text-slate-400 ml-0.5">건 ({pct}%)</span></p>
-                      </div>
-                      {item.samples.slice(0, 1).map((s, i) => (
-                        <p key={i} className="text-[10px] text-slate-500 leading-relaxed line-clamp-2">"{s}"</p>
-                      ))}
-                    </div>
-                  );
-                })}
-              </div>
+              <>
+                <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50/60 p-3 flex items-start gap-2">
+                  <AlertTriangle className="h-3.5 w-3.5 text-amber-600 shrink-0 mt-0.5" />
+                  <p className="text-[11px] text-amber-900 leading-relaxed">
+                    Detractor {detractorCategoryStats.detractorTotal.toLocaleString()}건 중 피드백 텍스트가 있는{" "}
+                    <span className="font-bold">{detractorCategoryStats.total.toLocaleString()}건({detractorCategoryStats.fillRate}%)만</span>{" "}
+                    아래 카테고리 분석 대상입니다. 나머지 {detractorCategoryStats.noFeedbackCount.toLocaleString()}건은 사유 텍스트가 없어(사유 미기재) 집계에서 제외했습니다.
+                  </p>
+                </div>
+                {detractorCategoryStats.total === 0 ? (
+                  <p className="text-xs text-slate-400 text-center py-6">텍스트가 있는 피드백이 없어 카테고리 분석을 표시할 수 없습니다.</p>
+                ) : (
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                    {detractorCategoryStats.breakdown.map((item) => {
+                      const pct = detractorCategoryStats.total > 0 ? Math.round((item.count / detractorCategoryStats.total) * 100) : 0;
+                      return (
+                        <div key={item.name} className="rounded-2xl border border-rose-100 bg-rose-50/20 p-4 space-y-2">
+                          <div className="flex items-baseline justify-between">
+                            <p className="text-xs font-bold text-slate-800">{item.name}</p>
+                            <p className="text-lg font-black text-rose-700">{item.count}<span className="text-[10px] font-bold text-slate-400 ml-0.5">건 ({pct}%)</span></p>
+                          </div>
+                          {item.samples.slice(0, 1).map((s, i) => (
+                            <p key={i} className="text-[10px] text-slate-500 leading-relaxed line-clamp-2">"{s}"</p>
+                          ))}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </>
             )}
           </div>
 

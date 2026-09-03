@@ -4,7 +4,7 @@ import { Incident, initialIncidentsData } from "../data/initialIncidents";
 import { OrderItem, initialOrderItemsData } from "../data/orderItems";
 import { ProblemForm, initialProblemFormsData } from "../data/problemForms";
 import { ChatRoom, initialChatRoomsData } from "../data/chatRooms";
-import { CsCostExportRow, DispatchFailureRow, NpsSummary, NpsDetractorRow, NpsTrendPoint, classifyCategory, getDepartmentForCategory } from "../utils/csvParser";
+import { CsCostExportRow, DispatchFailureRow, NpsSummary, NpsDetractorRow, NpsTrendPoint, NpsImportResult, classifyCategory, getDepartmentForCategory } from "../utils/csvParser";
 import { defaultCompanyHolidays } from "../data/companyHolidays";
 import { idbLoad, idbSave } from "../utils/idbStorage";
 import { DEFAULT_MONTHLY_CS_LABOR_COST_ALLOCATION_KRW } from "../utils/chatRoomEngine";
@@ -94,15 +94,13 @@ interface ReviewsContextType {
   importDispatchFailureWeekly: (rows: DispatchFailureRow[], replace?: boolean) => void;
   dispatchFailureMonthly: DispatchFailureRow[];
   importDispatchFailureMonthly: (rows: DispatchFailureRow[], replace?: boolean) => void;
-  // Part F — 전사 NPS 요약치(ARES III 원본 응답 3.4만 건+는 절대 프론트로 올리지 않고, 사전 집계된
-  // total/promoters/passives/detractors 요약값만 보관). "금주 사진후기 vs 전사 누적 NPS" 비교 차트의
-  // 데이터 소스 — 최초값은 확인 시점 스냅샷으로 시드해두고, CSV/문구 재업로드 시 통째로 교체된다.
+  // Part F — 전사 NPS. ARES III 원본 응답 3.4만 건+는 절대 프론트/localStorage에 올리지 않고, 원본
+  // CSV 하나를 업로드하는 즉시(parseNpsImportCsv) 계산되는 소규모 파생값 3종(요약/Detractor 서브셋/
+  // 월별 추이)만 통째로 교체 보관한다 — 셋 다 같은 업로드 한 번에서 동시에 갱신된다.
   npsSummary: NpsSummary;
-  importNpsSummary: (summary: NpsSummary) => void;
-  // Part F 우선순위 2/4/5 — NPS Detractor(0~6점) 응답 전용(ARES III 원본 응답 3.4만 건+가 아니라
-  // 사용자가 미리 걸러 올린 수십~수백 건). 재업로드 시 항상 통째로 교체(csCostExportRows와 동일 패턴).
   npsDetractorRows: NpsDetractorRow[];
-  importNpsDetractorRows: (rows: NpsDetractorRow[]) => void;
+  npsTrend: NpsTrendPoint[];
+  applyNpsImport: (result: NpsImportResult) => void;
   // "연락완료" 컨택 상태 — npsDetractorRows.id를 키로 쓰는 별도 Set(리뷰의 resolvedActionIds와 동일
   // 패턴). 데이터 재업로드로 rows가 통째로 바뀌어도 이미 컨택한 고객의 완료 표시는 유지된다.
   npsContactedIds: Set<string>;
@@ -110,9 +108,6 @@ interface ReviewsContextType {
   // 우선순위 2 "구매횟수 임계값" — 관리자가 조정 가능해야 한다는 스펙 요건. 기본값 5회.
   npsWatchlistThreshold: number;
   setNpsWatchlistThreshold: (n: number) => void;
-  // Part F 우선순위 3 — NPS 스코어 추이(월/주별 집계, 로우 데이터 아님). period 기준 병합.
-  npsTrend: NpsTrendPoint[];
-  importNpsTrend: (rows: NpsTrendPoint[], replace?: boolean) => void;
   productStats: ProductStat[];
   isLoading: boolean;
   addReview: (review: Omit<Review, "id">) => Promise<void>;
@@ -1040,16 +1035,14 @@ export function ReviewsProvider({ children }: { children: React.ReactNode }) {
     setDispatchFailureMonthly(combined);
   };
 
-  // NPS 요약치는 항상 통째로 교체(과거값과 병합할 개념 자체가 없음 — 시점 스냅샷 하나뿐).
-  // asOf가 없으면(문구/CSV에 날짜 정보가 없는 대부분의 경우) 업로드하는 지금 시각의 KST 날짜를 채운다.
-  const importNpsSummary = (summary: NpsSummary) => {
-    setNpsSummary({ ...summary, asOf: summary.asOf || formatKSTDate(getKSTDate()) });
-  };
-
-  // csCostExportRows와 동일하게 병합 개념 없이 항상 전체 교체 — 컨택 상태는 npsContactedIds에
-  // id로 별도 보관되니, rows가 통째로 바뀌어도(재업로드) 이미 컨택 완료한 고객 표시는 안 사라진다.
-  const importNpsDetractorRows = (rows: NpsDetractorRow[]) => {
-    setNpsDetractorRows(rows);
+  // 원본 CSV 임포터(parseNpsImportCsv) 한 번의 결과로 요약/Detractor/추이 3종을 동시에 통째로
+  // 교체한다 — 셋 다 같은 업로드에서 나온 값이라 따로 병합할 개념이 없다(csCostExportRows와 동일한
+  // "전체 교체" 패턴). 컨택 상태는 npsContactedIds에 id로 별도 보관되니 rows가 통째로 바뀌어도
+  // (재업로드) 이미 컨택 완료한 고객 표시는 안 사라진다.
+  const applyNpsImport = (result: NpsImportResult) => {
+    setNpsSummary({ ...result.summary, asOf: formatKSTDate(getKSTDate()) });
+    setNpsDetractorRows(result.detractorRows);
+    setNpsTrend(result.trend);
   };
 
   const toggleNpsContact = (id: string) => {
@@ -1059,21 +1052,6 @@ export function ReviewsProvider({ children }: { children: React.ReactNode }) {
       else next.add(id);
       return next;
     });
-  };
-
-  // 로우 데이터가 아니라 이미 집계된 기간별 스코어라 발송불가율(Part E)과 동일하게 period 기준 병합.
-  const importNpsTrend = (newRows: NpsTrendPoint[], replace: boolean = true) => {
-    let combined: NpsTrendPoint[];
-    if (!replace) {
-      const map = new Map<string, NpsTrendPoint>();
-      npsTrend.forEach(r => map.set(r.period, { ...r }));
-      newRows.forEach(r => map.set(r.period, { ...r }));
-      combined = Array.from(map.values());
-    } else {
-      combined = [...newRows];
-    }
-    combined.sort((a, b) => a.period.localeCompare(b.period));
-    setNpsTrend(combined);
   };
 
   // Bulk import parsed CSV reviews into local state (IndexedDB에 저장됨, Firestore 연동 아님)
@@ -1172,15 +1150,13 @@ export function ReviewsProvider({ children }: { children: React.ReactNode }) {
       dispatchFailureMonthly,
       importDispatchFailureMonthly,
       npsSummary,
-      importNpsSummary,
       npsDetractorRows,
-      importNpsDetractorRows,
+      npsTrend,
+      applyNpsImport,
       npsContactedIds,
       toggleNpsContact,
       npsWatchlistThreshold,
       setNpsWatchlistThreshold,
-      npsTrend,
-      importNpsTrend,
       companyHolidays,
       setCompanyHolidays,
       monthlyCsLaborCostAllocation,

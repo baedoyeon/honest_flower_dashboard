@@ -1,20 +1,14 @@
-import { useMemo, useRef, useState } from "react";
-import { AnimatePresence, motion } from "motion/react";
+import { useMemo } from "react";
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from "recharts";
-import {
-  TrendingUp, Upload, X, FileSpreadsheet, Loader2, CheckCircle2, AlertTriangle,
-  TrendingDown, Minus,
-} from "lucide-react";
+import { TrendingUp, TrendingDown, Minus } from "lucide-react";
 import { useReviews } from "../context/ReviewsContext";
-import { parseCSVToNpsTrend, NpsTrendParseResult } from "../utils/csvParser";
-import SchemaMismatchError from "./SchemaMismatchError";
 
 const NPS_TREND_COLOR = "#6366f1";
 
 // ClaimCostTab의 "전년동월 대비 없으면 직전월 대비로 폴백" 컨벤션을 그대로 따른다 — period가
-// "YYYY-MM"이든 "YYYY-WW"든 첫 "-" 앞을 연도로 보고 동일한 로직을 적용할 수 있다.
+// "YYYY-MM"이므로 첫 "-" 앞을 연도로 보고 동일한 로직을 적용할 수 있다.
 function splitYearAndRest(period: string): { year: string; rest: string } | null {
   const idx = period.indexOf("-");
   if (idx === -1) return null;
@@ -36,59 +30,11 @@ function CustomTooltip({ active, payload }: any) {
   );
 }
 
+// Part F 우선순위 3 — 별도 업로드 없음. 위 "NPS Detractor 이탈 위험군 추적" 위젯에서 원본 CSV를
+// 올리는 즉시 생성일 기준 월별 집계(npsTrend)가 함께 계산되므로, 이 위젯은 그 결과를 그대로 표시만
+// 한다.
 export default function NpsTrendWidget() {
-  const { npsTrend, importNpsTrend } = useReviews();
-
-  const [showModal, setShowModal] = useState(false);
-  const [activeImportTab, setActiveImportTab] = useState<"file" | "paste">("file");
-  const [csvRawText, setCsvRawText] = useState("");
-  const [isParsingCSV, setIsParsingCSV] = useState(false);
-  const [parsedResult, setParsedResult] = useState<NpsTrendParseResult | null>(null);
-  const [importMode, setImportMode] = useState<"append" | "replace">("append");
-  const [importSuccessMsg, setImportSuccessMsg] = useState<string | null>(null);
-  const [isDragging, setIsDragging] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const handleFileProcess = (file: File) => {
-    if (!file) return;
-    setIsParsingCSV(true);
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      try {
-        setParsedResult(parseCSVToNpsTrend(event.target?.result as string));
-      } catch (err) {
-        alert("CSV 파싱 중 오류가 발생했습니다: " + (err as Error).message);
-      } finally {
-        setIsParsingCSV(false);
-      }
-    };
-    reader.onerror = () => { alert("파일을 읽을 수 없습니다."); setIsParsingCSV(false); };
-    reader.readAsText(file, "utf-8");
-  };
-
-  const handleTextParse = () => {
-    if (!csvRawText.trim()) return;
-    setIsParsingCSV(true);
-    try {
-      setParsedResult(parseCSVToNpsTrend(csvRawText));
-    } catch (err) {
-      alert("CSV 텍스트 파싱 오류: " + (err as Error).message);
-    } finally {
-      setIsParsingCSV(false);
-    }
-  };
-
-  const handleApply = () => {
-    if (!parsedResult || parsedResult.rows.length === 0) return;
-    importNpsTrend(parsedResult.rows, importMode === "replace");
-    setImportSuccessMsg(`NPS 추이 데이터 ${parsedResult.validCount}건이 반영되었습니다!`);
-    setTimeout(() => {
-      setParsedResult(null);
-      setCsvRawText("");
-      setShowModal(false);
-      setImportSuccessMsg(null);
-    }, 2000);
-  };
+  const { npsTrend } = useReviews();
 
   const latest = npsTrend.length > 0 ? npsTrend[npsTrend.length - 1] : undefined;
 
@@ -115,183 +61,20 @@ export default function NpsTrendWidget() {
 
   return (
     <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm space-y-4">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
-        <div className="flex items-start gap-2">
-          <TrendingUp className="h-5 w-5 text-indigo-600 mt-0.5" />
-          <div>
-            <h3 className="text-sm font-bold text-slate-900">NPS 스코어 추이</h3>
-            <p className="text-[11px] text-slate-400 mt-0.5">기간별로 이미 집계된 NPS 스코어 하나만 업로드합니다(원본 응답 불필요).</p>
-          </div>
+      <div className="flex items-start gap-2 border-b border-slate-100 pb-3">
+        <TrendingUp className="h-5 w-5 text-indigo-600 mt-0.5" />
+        <div>
+          <h3 className="text-sm font-bold text-slate-900">NPS 스코어 월별 추이</h3>
+          <p className="text-[11px] text-slate-400 mt-0.5">
+            위 "NPS Detractor 이탈 위험군 추적" 위젯에서 원본 CSV를 올리면 생성일 기준으로 자동 집계됩니다(별도 업로드 불필요).
+          </p>
         </div>
-        <button
-          onClick={() => setShowModal(!showModal)}
-          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition shadow-xs cursor-pointer shrink-0"
-        >
-          <Upload className="h-4 w-4" />
-          <span>NPS 추이 CSV 업로드</span>
-        </button>
       </div>
-
-      <AnimatePresence>
-        {showModal && (
-          <motion.div
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: "auto" }}
-            exit={{ opacity: 0, height: 0 }}
-            className="overflow-hidden"
-          >
-            <div className="rounded-2xl border border-indigo-200 bg-white p-5 space-y-4">
-              <div className="flex items-center justify-between border-b border-indigo-100 pb-3">
-                <div className="flex items-center gap-2">
-                  <FileSpreadsheet className="h-4 w-4 text-indigo-600" />
-                  <h4 className="text-xs font-bold text-slate-900">NPS 추이(기간별 집계) CSV 임포터</h4>
-                </div>
-                <button
-                  onClick={() => { setShowModal(false); setParsedResult(null); }}
-                  className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition cursor-pointer"
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setActiveImportTab("file")}
-                  className={`px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
-                    activeImportTab === "file" ? "bg-slate-800 text-white shadow-2xs" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                  }`}
-                >
-                  파일 업로드 (.csv)
-                </button>
-                <button
-                  onClick={() => setActiveImportTab("paste")}
-                  className={`px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
-                    activeImportTab === "paste" ? "bg-slate-800 text-white shadow-2xs" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                  }`}
-                >
-                  CSV 텍스트 직접 붙여넣기
-                </button>
-              </div>
-
-              {activeImportTab === "file" && (
-                <div
-                  onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
-                  onDragLeave={() => setIsDragging(false)}
-                  onDrop={(e) => {
-                    e.preventDefault();
-                    setIsDragging(false);
-                    if (e.dataTransfer.files?.[0]) handleFileProcess(e.dataTransfer.files[0]);
-                  }}
-                  onClick={() => fileInputRef.current?.click()}
-                  className={`border-2 border-dashed rounded-2xl p-8 text-center cursor-pointer transition ${
-                    isDragging ? "border-indigo-500 bg-indigo-50/50" : "border-slate-200 bg-slate-50/50 hover:border-indigo-400 hover:bg-indigo-50/20"
-                  }`}
-                >
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept=".csv,text/csv"
-                    className="hidden"
-                    onChange={(e) => { if (e.target.files?.[0]) handleFileProcess(e.target.files[0]); }}
-                  />
-                  <div className="flex flex-col items-center gap-2">
-                    <div className="rounded-full p-3 bg-indigo-100 text-indigo-700">
-                      <Upload className="h-6 w-6" />
-                    </div>
-                    <p className="text-xs font-bold text-slate-800">월별/주별 집계 CSV 파일을 드래그하여 놓거나 클릭하여 업로드</p>
-                    <p className="text-[11px] text-slate-400">지원 열: period, score, total(선택)</p>
-                  </div>
-                </div>
-              )}
-
-              {activeImportTab === "paste" && (
-                <div className="space-y-3">
-                  <textarea
-                    rows={5}
-                    value={csvRawText}
-                    onChange={(e) => setCsvRawText(e.target.value)}
-                    placeholder={"period,score,total\n2026-06,74,5200\n2026-07,76,5400\n2026-08,78,5600"}
-                    className="w-full rounded-2xl border border-slate-200 bg-slate-50/40 p-4 text-xs font-mono text-slate-800 placeholder-slate-400 focus:outline-hidden focus:ring-2 focus:ring-indigo-500"
-                  />
-                  <div className="flex justify-end">
-                    <button
-                      onClick={handleTextParse}
-                      disabled={isParsingCSV || !csvRawText.trim()}
-                      className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 text-xs font-bold transition shadow-xs cursor-pointer disabled:opacity-50"
-                    >
-                      {isParsingCSV ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
-                      <span>텍스트 파싱 및 검증</span>
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {parsedResult && (
-                <div className="rounded-2xl border border-indigo-200 bg-indigo-50/20 p-5 space-y-4">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-indigo-100 pb-3">
-                    <div className="flex items-center gap-2">
-                      <CheckCircle2 className="h-5 w-5 text-emerald-600" />
-                      <h5 className="text-sm font-bold text-slate-900">
-                        파싱 검증 완료: 총 <span className="text-indigo-700 font-extrabold">{parsedResult.validCount}</span>행
-                      </h5>
-                    </div>
-                    <div className="flex items-center gap-3 text-xs font-medium text-slate-700">
-                      <span>적용 방식:</span>
-                      <label className="flex items-center gap-1 cursor-pointer">
-                        <input type="radio" name="npsTrendImportMode" checked={importMode === "append"} onChange={() => setImportMode("append")} className="text-indigo-600 focus:ring-indigo-500" />
-                        <span>기존 병합(같은 기간 갱신)</span>
-                      </label>
-                      <label className="flex items-center gap-1 cursor-pointer ml-2">
-                        <input type="radio" name="npsTrendImportMode" checked={importMode === "replace"} onChange={() => setImportMode("replace")} className="text-indigo-600 focus:ring-indigo-500" />
-                        <span>전체 교체</span>
-                      </label>
-                    </div>
-                  </div>
-
-                  {parsedResult.isLikelyWrongFileType ? (
-                    <SchemaMismatchError
-                      detectedColumns={parsedResult.detectedColumns}
-                      guidance="period, score 컬럼을 가진 기간별 집계 CSV가 맞는지 확인해주세요."
-                    />
-                  ) : parsedResult.missingCriticalColumns.length > 0 && (
-                    <div className="rounded-xl border border-amber-300 bg-amber-50 p-3.5 flex items-start gap-2.5">
-                      <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
-                      <p className="text-xs text-amber-900 leading-relaxed">
-                        <span className="font-bold">다음 필수 컬럼을 인식하지 못했습니다: {parsedResult.missingCriticalColumns.join(", ")}.</span>{" "}
-                        CSV 헤더명을 확인해주세요.
-                      </p>
-                    </div>
-                  )}
-
-                  <div className="flex items-center justify-between pt-2">
-                    <button onClick={() => setParsedResult(null)} className="text-xs text-slate-400 hover:text-slate-600 font-bold px-3 py-2 rounded-xl transition cursor-pointer">취소</button>
-                    <button
-                      onClick={handleApply}
-                      disabled={parsedResult.rows.length === 0}
-                      className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-2.5 text-xs font-bold transition shadow-xs cursor-pointer disabled:opacity-50"
-                    >
-                      <CheckCircle2 className="h-4 w-4" />
-                      <span>반영 ({parsedResult.validCount}건)</span>
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {importSuccessMsg && (
-                <div className="rounded-2xl bg-emerald-600 text-white p-4 flex items-center gap-3">
-                  <CheckCircle2 className="h-5 w-5 shrink-0" />
-                  <span className="text-xs font-bold">{importSuccessMsg}</span>
-                </div>
-              )}
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
 
       {npsTrend.length === 0 ? (
         <div className="text-center py-10">
           <TrendingUp className="h-8 w-8 text-slate-300 mx-auto mb-2" />
-          <p className="text-xs text-slate-400">아직 업로드된 NPS 추이 데이터가 없습니다.</p>
+          <p className="text-xs text-slate-400">아직 집계된 NPS 추이 데이터가 없습니다.</p>
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
