@@ -127,6 +127,7 @@ export default function ItemWeeklyClaimHeatmap({
             </button>
             <button
               onClick={() => setMetric("share")}
+              title="그날 전체 사고접수 건수 중 이 상품이 차지하는 비중 — 주문건수 대비 발생률이 아님(그건 오른쪽 '클레임율' 컬럼 참고)"
               className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition cursor-pointer ${
                 metric === "share" ? "bg-white shadow-2xs text-rose-700" : "text-slate-400 hover:text-slate-600"
               }`}
@@ -167,6 +168,9 @@ export default function ItemWeeklyClaimHeatmap({
             ))}
           </div>
           <span>{maxValue}{metric === "count" ? "건+" : "%+"}</span>
+          {metric === "share" && (
+            <span className="ml-2 text-slate-400">— 그날 전체 사고접수 중 이 상품 비중(주문 대비 발생률 아님, 클레임율 컬럼 참고)</span>
+          )}
         </div>
       )}
 

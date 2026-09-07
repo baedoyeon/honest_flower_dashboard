@@ -793,9 +793,12 @@ function ProductClaimTable({ stats, monthLabel }: { stats: ProductClaimStat[]; m
       <div className="mb-4 rounded-xl border border-indigo-200 bg-indigo-50/60 p-3 flex items-start gap-2">
         <Info className="h-3.5 w-3.5 text-indigo-600 shrink-0 mt-0.5" />
         <p className="text-[11px] text-indigo-900 leading-relaxed">
-          이 표는 <b>원주문의 결제월</b> 기준입니다 — 사고가 이번 달에 접수됐어도 원주문이 지난달에
-          결제됐다면 지난달 표에 잡힙니다. "사고접수" 탭은 반대로 <b>접수일</b> 기준이라 두 탭의 건수가
-          서로 다를 수 있습니다(둘 다 정상 — 보는 기준이 다를 뿐입니다).
+          "사고접수" 탭과 이 표의 건수가 다르게 보일 수 있는 이유 두 가지: ① 이 표는 <b>원주문의
+          결제월</b> 기준입니다 — 사고가 이번 달에 접수됐어도 원주문이 지난달에 결제됐다면 지난달
+          표에 잡힙니다("사고접수" 탭은 반대로 <b>접수일</b> 기준). ② 이번달처럼 아직 <b>성숙
+          윈도우(수령일+7일)</b>가 안 지난 상품은 사고접수 기한이 남아있어 앞으로 건수가 더 늘어날
+          수 있는 잠정치입니다(위 "잠정치" 안내 참고). 둘 다 계산이 틀린 게 아니라 보는 기준·시점이
+          다른 것뿐입니다.
         </p>
       </div>
 
