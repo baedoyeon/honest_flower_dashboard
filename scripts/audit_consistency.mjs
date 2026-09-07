@@ -251,6 +251,51 @@ function checkReviewRatingSentimentOutliers(header, dataRows) {
 }
 
 // ---------------------------------------------------------------------------
+// 6. "전체기간 누적 top-N" 랭킹이 최근 활동을 얼마나 가리는지 체크 — 실제로 사고접수 히트맵에서
+// 이 문제로 최근 발생 건의 37.5%가 기본 화면에서 안 보였던 적이 있다(top20이 전체기간 누적 기준
+// 이라 방금 처음 터진 상품이 순위 밖으로 밀림). 앞으로 이런 "누적순 정렬이 최근 신호를 가린다"류
+// 회귀를 자동으로 잡기 위한 체크 — 특정 위젯 하나가 아니라 "상품별 전체기간 top-N 안에 최근 활동이
+// 얼마나 들어있는가"를 일반적으로 계산한다.
+function checkTopNRecencyCoverage(pfHeader, pfRows, topN = 20, recentDays = 14) {
+  section(`ProblemForm 상품별 "전체기간 top${topN}" 랭킹의 최근 ${recentDays}일 커버리지`);
+  const colProduct = findCol(pfHeader, "상품명");
+  const colReceived = findCol(pfHeader, "접수시간");
+  if (colProduct === -1 || colReceived === -1) {
+    warn("상품명/접수시간 컬럼을 못 찾음 — 스킵");
+    return;
+  }
+  const baseName = (raw) => (raw || "").split("/")[0].trim();
+
+  const rows = pfRows
+    .map(r => ({ product: baseName(r[colProduct]), received: normDate(r[colReceived]) }))
+    .filter(r => r.product && r.received);
+  if (rows.length === 0) { info("유효 행 없음 — 스킵"); return; }
+
+  const latestDate = rows.reduce((max, r) => (r.received > max ? r.received : max), rows[0].received);
+  const cutoff = new Date(latestDate.replace(/\./g, "-"));
+  cutoff.setDate(cutoff.getDate() - recentDays);
+  const cutoffStr = `${cutoff.getFullYear()}.${String(cutoff.getMonth() + 1).padStart(2, "0")}.${String(cutoff.getDate()).padStart(2, "0")}`;
+
+  const totalByProduct = new Map();
+  rows.forEach(r => totalByProduct.set(r.product, (totalByProduct.get(r.product) || 0) + 1));
+  const top = new Set(
+    [...totalByProduct.entries()].sort((a, b) => b[1] - a[1]).slice(0, topN).map(([name]) => name)
+  );
+
+  const recentRows = rows.filter(r => r.received >= cutoffStr);
+  const recentTotal = recentRows.length;
+  const recentInTop = recentRows.filter(r => top.has(r.product)).length;
+  const coverage = recentTotal > 0 ? Math.round((recentInTop / recentTotal) * 1000) / 10 : 100;
+
+  info(`최근 ${recentDays}일(${cutoffStr}~${latestDate}) 사고접수 ${recentTotal}건, 전체기간 top${topN} 상품에 속한 건: ${recentInTop}건`);
+  if (coverage >= 90 || recentTotal === 0) {
+    pass(`커버리지 ${coverage}% — 전체기간 누적 top${topN}만 봐도 최근 활동을 거의 다 포착함`);
+  } else {
+    warn(`커버리지 ${coverage}%만 — 최근 ${recentDays}일 사고접수 중 ${recentTotal - recentInTop}건이 "전체기간 top${topN}" 밖의 상품 것이라, 누적순으로만 정렬된 화면에는 안 보일 수 있음. 해당 위젯이 최근 활동순 정렬/전체보기 옵션을 제공하는지 확인할 것`);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // main
 // ---------------------------------------------------------------------------
 function getArg(name) {
@@ -288,6 +333,7 @@ if (problemFormPath) {
   checkDecimalRoundTrip("ProblemForm", pf.header, pf.dataRows, [
     ["환불 금액", findCol(pf.header, "환불 금액")],
   ]);
+  checkTopNRecencyCoverage(pf.header, pf.dataRows);
 }
 
 if (reviewPath) {
