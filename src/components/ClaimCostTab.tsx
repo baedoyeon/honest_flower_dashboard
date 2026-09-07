@@ -19,11 +19,10 @@ import {
 } from "../utils/csvParser";
 import {
   computeMonthlyStats, computeDailyTrend, computeHandlingMethodStats, computeProductClaimStats,
-  computeItemWeeklyClaimPivot, computeSalesSkuStats, computeMethodBreakdownByWeek,
+  computeSalesSkuStats, computeMethodBreakdownByWeek,
   verifyAccidentScopeReflectsRefund, verifyClaimCostAgainstCsExport,
   calcClaimRate, calcClaimCostPerSales, won, MonthlyClaimStat, ProductClaimStat
 } from "../utils/claimCostEngine";
-import ItemWeeklyClaimHeatmap from "./ItemWeeklyClaimHeatmap";
 import MethodBreakdownTrendChart from "./MethodBreakdownTrendChart";
 import DispatchFailureWidget from "./DispatchFailureWidget";
 import SchemaMismatchError from "./SchemaMismatchError";
@@ -248,7 +247,6 @@ export default function ClaimCostTab() {
   const handlingMethodStats = useMemo(() => computeHandlingMethodStats(orderItems, problemForms), [orderItems, problemForms]);
   const allProductClaimStats = useMemo(() => computeProductClaimStats(orderItems, problemForms), [orderItems, problemForms]);
   const top3SkuClaims = useMemo(() => allProductClaimStats.slice(0, 3), [allProductClaimStats]);
-  const itemWeeklyClaimPivot = useMemo(() => computeItemWeeklyClaimPivot(orderItems, problemForms), [orderItems, problemForms]);
   const accidentScopeCheck = useMemo(() => verifyAccidentScopeReflectsRefund(orderItems, problemForms), [orderItems, problemForms]);
 
   const years = useMemo(
@@ -679,8 +677,6 @@ export default function ClaimCostTab() {
 
       <ProductClaimTable stats={productClaimStatsThisMonth} monthLabel={latest?.label ?? "이번달"} />
 
-      <ItemWeeklyClaimHeatmap rows={itemWeeklyClaimPivot.rows} weekStarts={itemWeeklyClaimPivot.weekStarts} />
-
       {/* 14일 일별 트렌드 */}
       <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
         <WidgetHeader
@@ -786,6 +782,15 @@ function ProductClaimTable({ stats, monthLabel }: { stats: ProductClaimStat[]; m
           계산식: "클레임율(%) = 상품별 클레임건수/상품별 주문건수×100 — Top3 위젯과 동일 공식. 총 클레임비용 = 환불액 합계 + 재발송비용 합계(순수 재발송·교환은 환불액이 0이라도 재발송비용이 발생함)",
         }}
       />
+
+      <div className="mb-4 rounded-xl border border-indigo-200 bg-indigo-50/60 p-3 flex items-start gap-2">
+        <Info className="h-3.5 w-3.5 text-indigo-600 shrink-0 mt-0.5" />
+        <p className="text-[11px] text-indigo-900 leading-relaxed">
+          이 표는 <b>원주문의 결제월</b> 기준입니다 — 사고가 이번 달에 접수됐어도 원주문이 지난달에
+          결제됐다면 지난달 표에 잡힙니다. "사고접수" 탭은 반대로 <b>접수일</b> 기준이라 두 탭의 건수가
+          서로 다를 수 있습니다(둘 다 정상 — 보는 기준이 다를 뿐입니다).
+        </p>
+      </div>
 
       <div className="relative max-w-xs mb-4">
         <input

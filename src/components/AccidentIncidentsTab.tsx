@@ -22,10 +22,12 @@ import {
 import { motion, AnimatePresence } from "motion/react";
 import { useReviews } from "../context/ReviewsContext";
 import { parseCSVToIncidents, IncidentParseResult, parseCSVToProblemForms } from "../utils/csvParser";
+import { computeItemWeeklyAccidentPivot } from "../utils/claimCostEngine";
+import ItemWeeklyClaimHeatmap from "./ItemWeeklyClaimHeatmap";
 import SchemaMismatchError from "./SchemaMismatchError";
 
 export default function AccidentIncidentsTab() {
-  const { weeklyIncidents, incidents, importIncidents, importProblemForms, isSyncing, weekFilter, setWeekFilter, weekRanges, highlightTargetId, setHighlightTargetId } = useReviews();
+  const { weeklyIncidents, incidents, problemForms, importIncidents, importProblemForms, isSyncing, weekFilter, setWeekFilter, weekRanges, highlightTargetId, setHighlightTargetId } = useReviews();
 
   // Filter and Search State
   const [incidentStatusFilter, setIncidentStatusFilter] = useState<"전체" | "처리완료" | "반려됨" | "접수중">("전체");
@@ -68,6 +70,11 @@ export default function AccidentIncidentsTab() {
   );
 
   // Accident KPI Metrics
+  // "상품 × 주차 사고접수 히트맵" — 원래 "매출/클레임비용" 탭에 있었는데, 결제월 귀속 기준이라
+  // 최근 주차일수록 항상 낮게 보이는 착시가 있었다(실측으로 확인). 이 탭은 이미 접수일 기준으로
+  // 동작하므로 여기로 옮기고 ProblemForm 자체 접수일/상품명만 쓰도록 재계산(OrderItem 조인 불필요).
+  const itemWeeklyAccidentPivot = useMemo(() => computeItemWeeklyAccidentPivot(problemForms), [problemForms]);
+
   const accidentMetrics = useMemo(() => {
     const total = activeIncidentList.length;
     const approved = activeIncidentList.filter(r => r.incidentStatus === "처리완료").length;
@@ -717,6 +724,8 @@ export default function AccidentIncidentsTab() {
           </div>
         </button>
       </div>
+
+      <ItemWeeklyClaimHeatmap rows={itemWeeklyAccidentPivot.rows} weekStarts={itemWeeklyAccidentPivot.weekStarts} />
 
       {/* Accident Detail Type Cause Distribution */}
       <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm space-y-4">

@@ -519,36 +519,37 @@ function weekOfYearLabel(weekStart: Date): string {
   return `${year}년 ${weekNum}주차 (${fmt(weekStart)}~${fmt(weekEnd)})`;
 }
 
-// 상품별·주차별 클레임(ProblemForm) 접수건수 + 그 주차 전체 클레임 중 비중을 계산한다.
-// 결제일 기준으로 주차에 귀속(computeClaimCostCohorts/computeProductClaimStats와 동일한 결제일 귀속
-// 원칙). "주문 아이템" FK로 조인되는 -CS 재발송 행이 아닌 원본 주문만 대상(computeProductClaimStats와
-// 동일 스코프). rows는 전체 기간 클레임건수 내림차순 — 위젯에서 상위 N개만 slice해서 쓴다.
-export function computeItemWeeklyClaimPivot(
-  orderItems: OrderItem[],
+// 상품별·주차별 "사고접수" 건수 + 그 주차 전체 사고접수 중 비중을 계산한다 — "사고접수" 탭 전용.
+// ProblemForm 자체의 접수일(receivedDate)·상품명(productName)만 쓴다(OrderItem 조인 불필요).
+//
+// ⚠️ 결제일이 아니라 접수일 기준인 이유(실측으로 확인됨): 이 히트맵의 목적은 "이 상품의 사고접수가
+// 최근 몇 주 사이 튀었는지" 파악이다 — 이건 CS/품질 모니터링 질문이라 "언제 접수됐나"로 나눠야
+// 한다. 예전엔 매출/클레임비용 탭의 결제월 귀속 원칙(computeClaimCostCohorts 등)과 억지로 맞춰
+// 결제일 기준으로 나눴는데, 그러면 최근 몇 주는 아직 사고접수 시간이 다 안 지나(성숙 윈도우) 항상
+// 낮게 나오는 착시가 있었다 — 실제로 결제일 기준 마지막 주는 33건인데 접수일 기준으론 63건+오늘
+// 주차까지 나옴. 매출/클레임비용 탭(결제월 귀속)과는 이제 숫자가 안 맞는 게 의도된 것이다.
+export function computeItemWeeklyAccidentPivot(
   problemForms: ProblemForm[]
 ): { rows: ItemWeeklyClaimRow[]; weekStarts: string[] } {
-  const originals = orderItems.filter(o => !o.isReshipCost && o.paymentDate);
-  const orderNumberMap = new Map<string, OrderItem>();
-  originals.forEach(o => { if (o.orderNumber) orderNumberMap.set(o.orderNumber, o); });
-
   // product -> weekStart(YYYY.MM.DD) -> count
   const byProductWeek = new Map<string, Map<string, number>>();
-  // weekStart -> 그 주 전체 클레임건수(모든 상품 합)
+  // weekStart -> 그 주 전체 사고접수건수(모든 상품 합)
   const weekTotals = new Map<string, number>();
   const weekStartSet = new Set<string>();
 
   problemForms.forEach(p => {
-    const order = orderNumberMap.get(p.orderItemRef);
-    if (!order) return; // 조인 안 되는 건은 상품/주차를 알 수 없어 집계에서 제외
-    const paymentDate = parseDateStr(order.paymentDate);
-    if (!paymentDate) return;
+    if (!p.receivedDate) return;
+    const receivedDate = parseDateStr(p.receivedDate);
+    if (!receivedDate) return;
+    const product = (p.productName || "").split("/")[0].trim();
+    if (!product) return;
 
-    const weekStartDate = mondayWeekStart(paymentDate);
+    const weekStartDate = mondayWeekStart(receivedDate);
     const weekStartStr = formatYmd(weekStartDate);
     weekStartSet.add(weekStartStr);
 
-    if (!byProductWeek.has(order.product)) byProductWeek.set(order.product, new Map());
-    const weekMap = byProductWeek.get(order.product)!;
+    if (!byProductWeek.has(product)) byProductWeek.set(product, new Map());
+    const weekMap = byProductWeek.get(product)!;
     weekMap.set(weekStartStr, (weekMap.get(weekStartStr) || 0) + 1);
 
     weekTotals.set(weekStartStr, (weekTotals.get(weekStartStr) || 0) + 1);

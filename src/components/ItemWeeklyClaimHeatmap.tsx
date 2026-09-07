@@ -58,7 +58,7 @@ export default function ItemWeeklyClaimHeatmap({
     return (
       <div className="rounded-3xl border border-slate-200 bg-white p-16 text-center shadow-sm">
         <Flame className="h-8 w-8 text-slate-300 mx-auto mb-2" />
-        <p className="text-xs text-slate-400">아직 상품×주차로 집계할 클레임 데이터가 없습니다.</p>
+        <p className="text-xs text-slate-400">아직 상품×주차로 집계할 사고접수 데이터가 없습니다.</p>
       </div>
     );
   }
@@ -69,10 +69,10 @@ export default function ItemWeeklyClaimHeatmap({
         <div className="flex items-start gap-2">
           <Flame className="h-4 w-4 text-rose-600 mt-0.5" />
           <div>
-            <h3 className="text-sm font-bold text-slate-900">상품 × 주차 클레임 히트맵</h3>
+            <h3 className="text-sm font-bold text-slate-900">상품 × 주차 사고접수 히트맵</h3>
             <p className="text-[11px] text-slate-400 mt-0.5">
-              특정 상품의 클레임이 최근 몇 주 사이 튀었는지, 원래 꾸준했는지 한눈에 파악. 클레임건수 상위{" "}
-              {Math.min(rows.length, DEFAULT_TOP_N)}개 상품 기본 표시 · 결제일 기준 월요일 시작 주차.
+              특정 상품의 사고접수가 최근 몇 주 사이 튀었는지, 원래 꾸준했는지 한눈에 파악. 사고접수건수 상위{" "}
+              {Math.min(rows.length, DEFAULT_TOP_N)}개 상품 기본 표시 · 접수일 기준 월요일 시작 주차.
             </p>
           </div>
         </div>
