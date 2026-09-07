@@ -85,9 +85,20 @@ export default function ProductStatusTab() {
       const avgRating = ratedList.length > 0 ? Math.round((sumRating / ratedList.length) * 100) / 100 : 0;
       const recommendRate = total > 0 ? Math.round((recommend / total) * 100) : 0;
 
-      // Calculate a "Caution Score" to rank products by severity of quality issues
-      // Focus on: non-recommendations, CS accidents, low rating
-      const cautionScore = (notRecommend * 40) + (accidentCount * 50) + (neutral * 10) + ((5 - avgRating) * 15) + (total * 0.1);
+      // "Caution Score" — 비율 기반으로 재계산(실측으로 확인된 볼륨 편향 수정). 예전엔 원시 카운트에
+      // 리뷰량 보너스(total*0.1)까지 더해서, 리뷰가 많이 달리는 상품(예: 플라워 럭키박스)이 실제
+      // 불량률과 무관하게 항상 최상위를 차지했다 — 리뷰 10건 중 4건이 비추천인 상품과 리뷰 100건 중
+      // 4건이 비추천인 상품이 똑같이 "notRecommend*40"으로 집계되던 게 원인. 리뷰가 있는 상품은
+      // notRecommend/neutral을 리뷰 수 대비 비율로, 사고접수는 리뷰 수 대비 비율로 계산해 "이 상품을
+      // 접한 사람 중 얼마나 문제를 겪었나"를 반영한다. 리뷰가 아예 없는(사고접수만 있는) 상품은 비교
+      // 대상이 없으니 사고접수 건수를 그대로 쓴다. avgRating은 실제 평점 데이터가 있을 때만 감점하고
+      // (0점=무평점을 "최악의 평점"으로 오인하면 안 됨), 없으면 감점하지 않는다.
+      const hasReviews = total > 0;
+      const notRecommendRate = hasReviews ? notRecommend / total : 0;
+      const neutralRate = hasReviews ? neutral / total : 0;
+      const accidentSignal = hasReviews ? (accidentCount / total) * 50 : accidentCount * 50;
+      const ratingPenalty = ratedList.length > 0 ? (5 - avgRating) * 15 : 0;
+      const cautionScore = (notRecommendRate * 40) + accidentSignal + (neutralRate * 10) + ratingPenalty;
 
       return {
         product,
@@ -114,9 +125,14 @@ export default function ProductStatusTab() {
     // If we have fewer than 3, we append other products sorted by lowest rating
     const finalProducts = [...sortedStats];
     if (finalProducts.length < 3) {
+      // avgRating===0은 "최악의 평점"이 아니라 "평점 데이터 없음"이라, 무평점 상품이 실제 저평점
+      // 상품보다 먼저 채워지면 안 된다 — 리뷰 있는 상품을 우선하고, 그 안에서만 평점 낮은 순.
       const remaining = stats
         .filter(s => !finalProducts.some(fp => fp.product === s.product))
-        .sort((a, b) => a.avgRating - b.avgRating);
+        .sort((a, b) => {
+          if ((a.total > 0) !== (b.total > 0)) return a.total > 0 ? -1 : 1;
+          return a.avgRating - b.avgRating;
+        });
       
       for (const r of remaining) {
         if (finalProducts.length >= 3) break;
