@@ -3,7 +3,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Responsive
 import { Award, ShieldAlert, Sparkles, Building2, Quote, AlertTriangle, BookOpen, Layers, CheckCircle2, HelpCircle, FileText, Filter, Search, ShieldCheck, Clock, ExternalLink, ThumbsDown, ArrowRight } from "lucide-react";
 import { motion } from "motion/react";
 import { useReviews } from "../context/ReviewsContext";
-import { classifyCategory } from "../utils/csvParser";
+import { classifyCategory, NPS_PURCHASE_TIERS, purchaseTierLabel } from "../utils/csvParser";
 
 function formatWon(n: number): string {
   return `${n.toLocaleString()}원`;
@@ -98,6 +98,30 @@ export default function VOCAnaTab() {
       }))
     };
   }, [npsPurchaseTierStats]);
+
+  // Part F 지표 #3 — 카테고리 × 구매등급 교차표. "배송 문제가 신규고객한테 몰려있나, 품질 문제가
+  // 단골한테 몰려있나"를 보려는 것. 피드백 텍스트가 있는 Detractor(전체의 약 19%)만 분류 가능하므로
+  // 표본이 작다 — 비율(%)이 아니라 원 건수를 그대로 보여줘서 착시를 만들지 않는다.
+  const categoryTierCrosstab = useMemo(() => {
+    const categories = ["품질/상태", "배송/포장", "상품구성/양", "서비스/시스템"] as const;
+    const tiers = NPS_PURCHASE_TIERS.map(t => t.label);
+    const grid: Record<string, Record<string, number>> = {};
+    categories.forEach(c => { grid[c] = {}; tiers.forEach(t => { grid[c][t] = 0; }); });
+
+    let totalWithFeedback = 0;
+    let maxCell = 0;
+    npsDetractorRows.forEach(r => {
+      if (!r.feedback) return;
+      totalWithFeedback++;
+      const cat = classifyCategory(r.feedback, 0, undefined);
+      const key = categories.includes(cat as any) ? cat : "품질/상태";
+      const tier = purchaseTierLabel(r.purchaseCount);
+      grid[key][tier]++;
+      maxCell = Math.max(maxCell, grid[key][tier]);
+    });
+
+    return { categories, tiers, grid, totalWithFeedback, maxCell };
+  }, [npsDetractorRows]);
 
   // 2. Identify Top 3 categories of concern based on '비추천' counts
   const topConcernCategories = useMemo(() => {
@@ -400,6 +424,50 @@ export default function VOCAnaTab() {
                         </div>
                       );
                     })}
+                  </div>
+                )}
+
+                {categoryTierCrosstab.totalWithFeedback > 0 && (
+                  <div className="mt-6 rounded-2xl border border-slate-200 bg-white p-4">
+                    <div className="mb-3 flex items-baseline justify-between">
+                      <p className="text-xs font-bold text-slate-800">불만유형 × 구매등급 교차표</p>
+                      <p className="text-[10px] text-slate-400">피드백 있는 {categoryTierCrosstab.totalWithFeedback.toLocaleString()}건 기준(원 건수)</p>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-[11px] border-separate border-spacing-1">
+                        <thead>
+                          <tr>
+                            <th className="text-left font-bold text-slate-500 px-2 py-1"></th>
+                            {categoryTierCrosstab.tiers.map(tier => (
+                              <th key={tier} className="text-center font-bold text-slate-500 px-2 py-1 whitespace-nowrap">{tier}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {categoryTierCrosstab.categories.map(cat => (
+                            <tr key={cat}>
+                              <td className="text-left font-bold text-slate-700 px-2 py-1 whitespace-nowrap">{cat}</td>
+                              {categoryTierCrosstab.tiers.map(tier => {
+                                const count = categoryTierCrosstab.grid[cat][tier];
+                                const ratio = categoryTierCrosstab.maxCell > 0 ? count / categoryTierCrosstab.maxCell : 0;
+                                const bg =
+                                  count === 0 ? "bg-slate-50 text-slate-300" :
+                                  ratio > 0.7 ? "bg-rose-600 text-white font-bold" :
+                                  ratio > 0.4 ? "bg-rose-300 text-rose-950 font-bold" :
+                                  ratio > 0.15 ? "bg-rose-100 text-rose-800" :
+                                  "bg-rose-50 text-rose-700";
+                                return (
+                                  <td key={tier} className={`text-center rounded-lg px-2 py-1.5 ${bg}`}>
+                                    {count}
+                                  </td>
+                                );
+                              })}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    <p className="text-[10px] text-slate-400 mt-2">색이 진할수록 해당 (불만유형, 구매등급) 조합의 건수가 많음을 뜻합니다. 표본이 작아 비율이 아닌 건수 그대로 표시합니다.</p>
                   </div>
                 )}
               </>

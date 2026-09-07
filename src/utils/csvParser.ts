@@ -1662,7 +1662,7 @@ export const NPS_PURCHASE_TIERS = [
   { label: "11회+", min: 11, max: Infinity },
 ] as const;
 
-function purchaseTierLabel(purchaseCount: number): string {
+export function purchaseTierLabel(purchaseCount: number): string {
   const tier = NPS_PURCHASE_TIERS.find(t => purchaseCount >= t.min && purchaseCount <= t.max);
   return tier ? tier.label : NPS_PURCHASE_TIERS[NPS_PURCHASE_TIERS.length - 1].label;
 }
