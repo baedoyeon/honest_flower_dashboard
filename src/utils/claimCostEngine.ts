@@ -477,18 +477,17 @@ export function computeProductClaimStats(orderItems: OrderItem[], problemForms: 
 // 크로스탭 2개)을 대시보드로 옮긴 것. 주차는 대시보드 상단 필터와 동일한 "월요일 시작" 기준.
 // ============================================================================
 
-export interface ItemWeeklyClaimCell {
-  weekStart: string; // "YYYY.MM.DD" (월요일)
-  weekEnd: string; // "YYYY.MM.DD" (일요일)
-  weekLabel: string; // "2026년 33주차 (08.10~08.16)" — 대시보드 자체 월요일 기준 주차 번호(ISO 8601 아님)
+export interface ItemDailyAccidentCell {
+  date: string; // "YYYY.MM.DD"
+  dateLabel: string; // "09.07(월)" — 요일까지 붙여서 표시
   count: number;
-  shareOfWeekTotal: number; // 0~100(%). 그 주차 전체 클레임건수가 0이면 0.
+  shareOfDayTotal: number; // 0~100(%). 그날 전체 사고접수건수가 0이면 0.
 }
 
-export interface ItemWeeklyClaimRow {
+export interface ItemDailyAccidentRow {
   item: string;
   totalCount: number; // 전체 기간 합계 — 정렬 및 Top20 선별 기준
-  weeks: ItemWeeklyClaimCell[]; // weekStarts와 동일한 순서(오름차순)로 상품마다 전체 주차 채움(0 포함)
+  days: ItemDailyAccidentCell[]; // dates와 동일한 순서(오름차순)로 상품마다 전체 일자 채움(0 포함)
 }
 
 // 대시보드의 "월요일 시작" 주차 정의와 통일 — ReviewsContext.tsx의 weekRanges 계산과 동일한 산식
@@ -519,23 +518,29 @@ function weekOfYearLabel(weekStart: Date): string {
   return `${year}년 ${weekNum}주차 (${fmt(weekStart)}~${fmt(weekEnd)})`;
 }
 
-// 상품별·주차별 "사고접수" 건수 + 그 주차 전체 사고접수 중 비중을 계산한다 — "사고접수" 탭 전용.
+const WEEKDAY_LABELS = ["일", "월", "화", "수", "목", "금", "토"];
+
+// 상품별·일자별 "사고접수" 건수 + 그날 전체 사고접수 중 비중을 계산한다 — "사고접수" 탭 전용.
 // ProblemForm 자체의 접수일(receivedDate)·상품명(productName)만 쓴다(OrderItem 조인 불필요).
 //
-// ⚠️ 결제일이 아니라 접수일 기준인 이유(실측으로 확인됨): 이 히트맵의 목적은 "이 상품의 사고접수가
-// 최근 몇 주 사이 튀었는지" 파악이다 — 이건 CS/품질 모니터링 질문이라 "언제 접수됐나"로 나눠야
-// 한다. 예전엔 매출/클레임비용 탭의 결제월 귀속 원칙(computeClaimCostCohorts 등)과 억지로 맞춰
-// 결제일 기준으로 나눴는데, 그러면 최근 몇 주는 아직 사고접수 시간이 다 안 지나(성숙 윈도우) 항상
-// 낮게 나오는 착시가 있었다 — 실제로 결제일 기준 마지막 주는 33건인데 접수일 기준으론 63건+오늘
-// 주차까지 나옴. 매출/클레임비용 탭(결제월 귀속)과는 이제 숫자가 안 맞는 게 의도된 것이다.
-export function computeItemWeeklyAccidentPivot(
+// ⚠️ 주 단위가 아니라 "일" 단위인 이유(실측으로 확인됨): 이 CS 업로드는 대개 최근 1~2주치 증분
+// 파일만 올라오는 경우가 많다(실제로 어드민 export가 그런 형태로 나옴). 그런데 주 단위로 묶으면
+// 데이터가 딱 1~2개 주차 컬럼에만 뭉쳐 찍혀서 "요즘 어느 날 튀었는지" 전혀 안 보이는 문제가 있었다
+// — 히트맵이 트렌드를 보여주려면 최소 몇 개 칸에는 걸쳐 퍼져야 하는데, 짧은 업로드 구간에서는 주
+// 단위 해상도 자체가 너무 거칠다. 이 앱에 이미 있는 "최근 14일 일별 트렌드" 차트와 같은 원칙으로
+// 일 단위로 바꿔서, 며칠치만 올려도 날짜별로 펼쳐져 패턴이 보이게 한다.
+//
+// (참고: 결제일이 아니라 접수일 기준인 것도 실측으로 확인된 별개의 이유 — 이 히트맵은 "언제
+// 접수됐나"를 보는 CS/품질 모니터링용이라, 결제월 귀속을 쓰는 매출/클레임비용 탭과는 숫자가
+// 원래 다르게 나오는 게 의도된 것이다.)
+export function computeItemDailyAccidentPivot(
   problemForms: ProblemForm[]
-): { rows: ItemWeeklyClaimRow[]; weekStarts: string[] } {
-  // product -> weekStart(YYYY.MM.DD) -> count
-  const byProductWeek = new Map<string, Map<string, number>>();
-  // weekStart -> 그 주 전체 사고접수건수(모든 상품 합)
-  const weekTotals = new Map<string, number>();
-  const weekStartSet = new Set<string>();
+): { rows: ItemDailyAccidentRow[]; dates: string[] } {
+  // product -> date(YYYY.MM.DD) -> count
+  const byProductDate = new Map<string, Map<string, number>>();
+  // date -> 그날 전체 사고접수건수(모든 상품 합)
+  const dateTotals = new Map<string, number>();
+  const dateSet = new Set<string>();
 
   problemForms.forEach(p => {
     if (!p.receivedDate) return;
@@ -544,41 +549,39 @@ export function computeItemWeeklyAccidentPivot(
     const product = (p.productName || "").split("/")[0].trim();
     if (!product) return;
 
-    const weekStartDate = mondayWeekStart(receivedDate);
-    const weekStartStr = formatYmd(weekStartDate);
-    weekStartSet.add(weekStartStr);
+    const dateStr = formatYmd(receivedDate);
+    dateSet.add(dateStr);
 
-    if (!byProductWeek.has(product)) byProductWeek.set(product, new Map());
-    const weekMap = byProductWeek.get(product)!;
-    weekMap.set(weekStartStr, (weekMap.get(weekStartStr) || 0) + 1);
+    if (!byProductDate.has(product)) byProductDate.set(product, new Map());
+    const dateMap = byProductDate.get(product)!;
+    dateMap.set(dateStr, (dateMap.get(dateStr) || 0) + 1);
 
-    weekTotals.set(weekStartStr, (weekTotals.get(weekStartStr) || 0) + 1);
+    dateTotals.set(dateStr, (dateTotals.get(dateStr) || 0) + 1);
   });
 
-  const weekStarts = Array.from(weekStartSet).sort((a, b) => a.localeCompare(b));
+  const dates = Array.from(dateSet).sort((a, b) => a.localeCompare(b));
 
-  const rows: ItemWeeklyClaimRow[] = Array.from(byProductWeek.entries()).map(([item, weekMap]) => {
+  const rows: ItemDailyAccidentRow[] = Array.from(byProductDate.entries()).map(([item, dateMap]) => {
     let totalCount = 0;
-    const weeks: ItemWeeklyClaimCell[] = weekStarts.map(weekStartStr => {
-      const count = weekMap.get(weekStartStr) || 0;
+    const days: ItemDailyAccidentCell[] = dates.map(dateStr => {
+      const count = dateMap.get(dateStr) || 0;
       totalCount += count;
-      const weekTotal = weekTotals.get(weekStartStr) || 0;
-      const weekStartDate = parseDateStr(weekStartStr)!;
-      const weekEndDate = addDays(weekStartDate, 6);
+      const dayTotal = dateTotals.get(dateStr) || 0;
+      const d = parseDateStr(dateStr)!;
+      const dateLabel = `${String(d.getMonth() + 1).padStart(2, "0")}.${String(d.getDate()).padStart(2, "0")}(${WEEKDAY_LABELS[d.getDay()]})`;
       return {
-        weekStart: weekStartStr,
-        weekEnd: formatYmd(weekEndDate),
-        weekLabel: weekOfYearLabel(weekStartDate),
+        date: dateStr,
+        dateLabel,
         count,
-        shareOfWeekTotal: weekTotal > 0 ? Math.round((count / weekTotal) * 1000) / 10 : 0,
+        shareOfDayTotal: dayTotal > 0 ? Math.round((count / dayTotal) * 1000) / 10 : 0,
       };
     });
-    return { item, totalCount, weeks };
+    return { item, totalCount, days };
   });
 
   rows.sort((a, b) => b.totalCount - a.totalCount);
 
-  return { rows, weekStarts };
+  return { rows, dates };
 }
 
 // 처리방법 5종의 주차별 비율 추이 — 구글시트 trend 탭의 일별 처리방법 비율 추이를 이 대시보드의

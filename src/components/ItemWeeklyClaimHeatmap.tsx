@@ -1,13 +1,13 @@
 import { useMemo, useState } from "react";
 import { Flame, Grid3x3, Table as TableIcon, ChevronDown, ChevronUp } from "lucide-react";
-import { ItemWeeklyClaimRow } from "../utils/claimCostEngine";
+import { ItemDailyAccidentRow } from "../utils/claimCostEngine";
 
-const DEFAULT_VISIBLE_WEEKS = 16;
+const DEFAULT_VISIBLE_DAYS = 30;
 const DEFAULT_TOP_N = 20;
-// "최근활동순" 정렬 기준 — 최근 2주(이번주 개념과 동일하게) 합산. 이 위젯의 목적이 "최근에 튄 상품
-// 찾기"인데 기본 정렬이 전체기간 누적 top20이면, 최근 처음 터진 상품이 누적건수가 적어 화면 밖으로
-// 밀려나 안 보이는 문제가 실측으로 확인됨(64건 중 24건이 top20 밖 상품 것이었음).
-const RECENT_WINDOW_WEEKS = 2;
+// "최근활동순" 정렬 기준 — 최근 3일 합산. 이 위젯의 목적이 "최근에 튄 상품 찾기"인데 기본 정렬이
+// 전체기간 누적 top20이면, 최근 처음 터진 상품이 누적건수가 적어 화면 밖으로 밀려나 안 보이는
+// 문제가 실측으로 확인됨(64건 중 24건이 top20 밖 상품 것이었음).
+const RECENT_WINDOW_DAYS = 3;
 
 type Metric = "count" | "share";
 type SortMode = "recent" | "total";
@@ -34,26 +34,26 @@ function formatMetricValue(metric: Metric, value: number): string {
 
 export default function ItemWeeklyClaimHeatmap({
   rows,
-  weekStarts,
+  dates,
 }: {
-  rows: ItemWeeklyClaimRow[];
-  weekStarts: string[];
+  rows: ItemDailyAccidentRow[];
+  dates: string[];
 }) {
   const [metric, setMetric] = useState<Metric>("count");
   const [sortMode, setSortMode] = useState<SortMode>("recent");
   const [viewMode, setViewMode] = useState<"heatmap" | "table">("heatmap");
-  const [showAllWeeks, setShowAllWeeks] = useState(false);
+  const [showAllDays, setShowAllDays] = useState(false);
   const [showAllItems, setShowAllItems] = useState(false);
 
-  const firstVisibleWeekIdx = showAllWeeks ? 0 : Math.max(0, weekStarts.length - DEFAULT_VISIBLE_WEEKS);
-  const visibleWeekStarts = weekStarts.slice(firstVisibleWeekIdx);
+  const firstVisibleDayIdx = showAllDays ? 0 : Math.max(0, dates.length - DEFAULT_VISIBLE_DAYS);
+  const visibleDates = dates.slice(firstVisibleDayIdx);
 
-  // 정렬 기준(전체건수 누적 vs 최근 N주 합)에 따라 순서만 다시 매긴다 — weeks 배열 자체는 그대로라
-  // 실제 주차별 값은 정렬과 무관하게 항상 정확하다.
+  // 정렬 기준(전체건수 누적 vs 최근 N일 합)에 따라 순서만 다시 매긴다 — days 배열 자체는 그대로라
+  // 실제 일자별 값은 정렬과 무관하게 항상 정확하다.
   const sortedRows = useMemo(() => {
     if (sortMode === "total") return rows;
     return [...rows].sort((a, b) => {
-      const recentSum = (r: ItemWeeklyClaimRow) => r.weeks.slice(-RECENT_WINDOW_WEEKS).reduce((s, w) => s + w.count, 0);
+      const recentSum = (r: ItemDailyAccidentRow) => r.days.slice(-RECENT_WINDOW_DAYS).reduce((s, d) => s + d.count, 0);
       const diff = recentSum(b) - recentSum(a);
       return diff !== 0 ? diff : b.totalCount - a.totalCount;
     });
@@ -64,19 +64,19 @@ export default function ItemWeeklyClaimHeatmap({
   const maxValue = useMemo(() => {
     let max = 0;
     visibleRows.forEach(r => {
-      r.weeks.slice(firstVisibleWeekIdx).forEach(w => {
-        const v = metric === "count" ? w.count : w.shareOfWeekTotal;
+      r.days.slice(firstVisibleDayIdx).forEach(d => {
+        const v = metric === "count" ? d.count : d.shareOfDayTotal;
         if (v > max) max = v;
       });
     });
     return max;
-  }, [visibleRows, firstVisibleWeekIdx, metric]);
+  }, [visibleRows, firstVisibleDayIdx, metric]);
 
   if (rows.length === 0) {
     return (
       <div className="rounded-3xl border border-slate-200 bg-white p-16 text-center shadow-sm">
         <Flame className="h-8 w-8 text-slate-300 mx-auto mb-2" />
-        <p className="text-xs text-slate-400">아직 상품×주차로 집계할 사고접수 데이터가 없습니다.</p>
+        <p className="text-xs text-slate-400">아직 상품×일자로 집계할 사고접수 데이터가 없습니다.</p>
       </div>
     );
   }
@@ -87,10 +87,10 @@ export default function ItemWeeklyClaimHeatmap({
         <div className="flex items-start gap-2">
           <Flame className="h-4 w-4 text-rose-600 mt-0.5" />
           <div>
-            <h3 className="text-sm font-bold text-slate-900">상품 × 주차 사고접수 히트맵</h3>
+            <h3 className="text-sm font-bold text-slate-900">상품 × 일자 사고접수 히트맵</h3>
             <p className="text-[11px] text-slate-400 mt-0.5">
-              특정 상품의 사고접수가 최근 몇 주 사이 튀었는지, 원래 꾸준했는지 한눈에 파악. {sortMode === "recent" ? `최근 ${RECENT_WINDOW_WEEKS}주 활동` : "전체기간 누적"} 기준 상위{" "}
-              {Math.min(rows.length, DEFAULT_TOP_N)}개 상품 기본 표시 · 접수일 기준 월요일 시작 주차.
+              특정 상품의 사고접수가 최근 며칠 사이 튀었는지, 원래 꾸준했는지 한눈에 파악. {sortMode === "recent" ? `최근 ${RECENT_WINDOW_DAYS}일 활동` : "전체기간 누적"} 기준 상위{" "}
+              {Math.min(rows.length, DEFAULT_TOP_N)}개 상품 기본 표시 · 접수일 기준 일별.
             </p>
           </div>
         </div>
@@ -99,7 +99,7 @@ export default function ItemWeeklyClaimHeatmap({
           <div className="flex bg-slate-100 rounded-xl p-1 gap-1">
             <button
               onClick={() => setSortMode("recent")}
-              title={`최근 ${RECENT_WINDOW_WEEKS}주 활동이 많은 상품부터 — 지금 막 튀기 시작한 상품도 놓치지 않음`}
+              title={`최근 ${RECENT_WINDOW_DAYS}일 활동이 많은 상품부터 — 지금 막 튀기 시작한 상품도 놓치지 않음`}
               className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition cursor-pointer ${
                 sortMode === "recent" ? "bg-white shadow-2xs text-rose-700" : "text-slate-400 hover:text-slate-600"
               }`}
@@ -180,9 +180,9 @@ export default function ItemWeeklyClaimHeatmap({
               <th className="py-2 px-3 font-bold text-slate-500 border-b border-slate-200 text-right whitespace-nowrap">
                 전체건수
               </th>
-              {visibleWeekStarts.map(ws => (
-                <th key={ws} className="py-2 px-1.5 font-bold text-slate-400 border-b border-slate-200 text-center whitespace-nowrap" style={{ minWidth: 56 }}>
-                  {ws.slice(5)}
+              {visibleDates.map(d => (
+                <th key={d} className="py-2 px-1.5 font-bold text-slate-400 border-b border-slate-200 text-center whitespace-nowrap" style={{ minWidth: 56 }}>
+                  {d.slice(5)}
                 </th>
               ))}
             </tr>
@@ -198,18 +198,18 @@ export default function ItemWeeklyClaimHeatmap({
                   {row.item}
                 </td>
                 <td className="py-1.5 px-3 text-right font-mono text-slate-500">{row.totalCount}건</td>
-                {row.weeks.slice(firstVisibleWeekIdx).map((w, i) => {
-                  const value = metric === "count" ? w.count : w.shareOfWeekTotal;
+                {row.days.slice(firstVisibleDayIdx).map((d, i) => {
+                  const value = metric === "count" ? d.count : d.shareOfDayTotal;
                   if (viewMode === "table") {
                     return (
-                      <td key={visibleWeekStarts[i]} className="py-1.5 px-1.5 text-center font-mono text-slate-600 border-l border-slate-50">
+                      <td key={visibleDates[i]} className="py-1.5 px-1.5 text-center font-mono text-slate-600 border-l border-slate-50">
                         {value > 0 ? formatMetricValue(metric, value) : "-"}
                       </td>
                     );
                   }
                   const { bg, text } = getCellClasses(value, maxValue);
                   return (
-                    <td key={visibleWeekStarts[i]} className="relative p-0 border-l border-slate-50 group">
+                    <td key={visibleDates[i]} className="relative p-0 border-l border-slate-50 group">
                       <div className={`h-8 flex items-center justify-center text-[10px] font-bold ${bg} ${text} transition group-hover:ring-2 group-hover:ring-rose-500 group-hover:ring-inset`}>
                         {formatMetricValue(metric, value)}
                       </div>
@@ -219,8 +219,8 @@ export default function ItemWeeklyClaimHeatmap({
                         }`}
                       >
                         <span className="font-bold">{row.item}</span>
-                        <span className="text-slate-300">{w.weekLabel}</span>
-                        <span>건수 {w.count}건 · 비율 {w.shareOfWeekTotal}%</span>
+                        <span className="text-slate-300">{d.dateLabel}</span>
+                        <span>건수 {d.count}건 · 비율 {d.shareOfDayTotal}%</span>
                       </div>
                     </td>
                   );
@@ -233,13 +233,13 @@ export default function ItemWeeklyClaimHeatmap({
       </div>
 
       <div className="flex items-center justify-between mt-3">
-        {weekStarts.length > DEFAULT_VISIBLE_WEEKS ? (
+        {dates.length > DEFAULT_VISIBLE_DAYS ? (
           <button
-            onClick={() => setShowAllWeeks(!showAllWeeks)}
+            onClick={() => setShowAllDays(!showAllDays)}
             className="inline-flex items-center gap-1 text-[11px] font-bold text-slate-500 hover:text-rose-700 transition cursor-pointer"
           >
-            {showAllWeeks ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-            {showAllWeeks ? `최근 ${DEFAULT_VISIBLE_WEEKS}주만 보기` : `전체 ${weekStarts.length}주 보기`}
+            {showAllDays ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+            {showAllDays ? `최근 ${DEFAULT_VISIBLE_DAYS}일만 보기` : `전체 ${dates.length}일 보기`}
           </button>
         ) : (
           <span />
