@@ -5,6 +5,10 @@ import { motion } from "motion/react";
 import { useReviews } from "../context/ReviewsContext";
 import { classifyCategory } from "../utils/csvParser";
 
+function formatWon(n: number): string {
+  return `${n.toLocaleString()}원`;
+}
+
 export default function VOCAnaTab() {
   const { weeklyReviews: reviewsData, npsDetractorRows, setActiveTab } = useReviews();
   const [activeGuideTab, setActiveGuideTab] = useState<"categories" | "judgment" | "patterns">("categories");
@@ -44,15 +48,25 @@ export default function VOCAnaTab() {
   const detractorCategoryStats = useMemo(() => {
     const categories = ["품질/상태", "배송/포장", "상품구성/양", "서비스/시스템"] as const;
     const counts: Record<string, number> = { "품질/상태": 0, "배송/포장": 0, "상품구성/양": 0, "서비스/시스템": 0 };
+    const revenue: Record<string, number> = { "품질/상태": 0, "배송/포장": 0, "상품구성/양": 0, "서비스/시스템": 0 };
     const samples: Record<string, string[]> = { "품질/상태": [], "배송/포장": [], "상품구성/양": [], "서비스/시스템": [] };
 
+    // 이탈위험 매출액 — 피드백 유무와 무관하게 Detractor 전체의 구매비용 합. "몇 명이냐"가 아니라
+    // "얼마가 걸려있냐"로 보여줘서 카테고리별 우선순위 판단의 근거로 쓴다(사용자 요청).
+    let totalRevenueAtRisk = 0;
+    let noFeedbackRevenue = 0;
     let withFeedback = 0;
     npsDetractorRows.forEach(r => {
-      if (!r.feedback) return;
+      totalRevenueAtRisk += r.totalPurchaseAmount || 0;
+      if (!r.feedback) {
+        noFeedbackRevenue += r.totalPurchaseAmount || 0;
+        return;
+      }
       withFeedback++;
       const cat = classifyCategory(r.feedback, 0, undefined);
       const key = categories.includes(cat as any) ? cat : "품질/상태";
       counts[key]++;
+      revenue[key] += r.totalPurchaseAmount || 0;
       if (samples[key].length < 2) samples[key].push(r.feedback!);
     });
 
@@ -62,7 +76,9 @@ export default function VOCAnaTab() {
       detractorTotal,
       noFeedbackCount: detractorTotal - withFeedback,
       fillRate: detractorTotal > 0 ? Math.round((withFeedback / detractorTotal) * 1000) / 10 : 0,
-      breakdown: categories.map(cat => ({ name: cat, count: counts[cat], samples: samples[cat] })).sort((a, b) => b.count - a.count)
+      totalRevenueAtRisk,
+      noFeedbackRevenue,
+      breakdown: categories.map(cat => ({ name: cat, count: counts[cat], revenue: revenue[cat], samples: samples[cat] })).sort((a, b) => b.revenue - a.revenue)
     };
   }, [npsDetractorRows]);
 
@@ -308,12 +324,20 @@ export default function VOCAnaTab() {
               </div>
             ) : (
               <>
+                <div className="mb-4 rounded-2xl border border-rose-200 bg-rose-50/50 p-4 flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-bold text-rose-900">이탈위험 매출액</p>
+                    <p className="text-[10px] text-rose-700/70 mt-0.5">Detractor {detractorCategoryStats.detractorTotal.toLocaleString()}명이 지금까지 구매한 누적 금액 합계</p>
+                  </div>
+                  <p className="text-2xl font-black text-rose-700">{formatWon(detractorCategoryStats.totalRevenueAtRisk)}</p>
+                </div>
+
                 <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50/60 p-3 flex items-start gap-2">
                   <AlertTriangle className="h-3.5 w-3.5 text-amber-600 shrink-0 mt-0.5" />
                   <p className="text-[11px] text-amber-900 leading-relaxed">
                     Detractor {detractorCategoryStats.detractorTotal.toLocaleString()}건 중 피드백 텍스트가 있는{" "}
                     <span className="font-bold">{detractorCategoryStats.total.toLocaleString()}건({detractorCategoryStats.fillRate}%)만</span>{" "}
-                    아래 카테고리 분석 대상입니다. 나머지 {detractorCategoryStats.noFeedbackCount.toLocaleString()}건은 사유 텍스트가 없어(사유 미기재) 집계에서 제외했습니다.
+                    아래 카테고리 분석 대상입니다. 나머지 {detractorCategoryStats.noFeedbackCount.toLocaleString()}건(매출 {formatWon(detractorCategoryStats.noFeedbackRevenue)})은 사유 텍스트가 없어(사유 미기재) 집계에서 제외했습니다.
                   </p>
                 </div>
                 {detractorCategoryStats.total === 0 ? (
@@ -328,6 +352,7 @@ export default function VOCAnaTab() {
                             <p className="text-xs font-bold text-slate-800">{item.name}</p>
                             <p className="text-lg font-black text-rose-700">{item.count}<span className="text-[10px] font-bold text-slate-400 ml-0.5">건 ({pct}%)</span></p>
                           </div>
+                          <p className="text-xs font-bold text-slate-600">{formatWon(item.revenue)}</p>
                           {item.samples.slice(0, 1).map((s, i) => (
                             <p key={i} className="text-[10px] text-slate-500 leading-relaxed line-clamp-2">"{s}"</p>
                           ))}

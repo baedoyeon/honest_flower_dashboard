@@ -4,11 +4,26 @@ import {
   Users, Upload, X, FileSpreadsheet, Loader2, CheckCircle2, AlertTriangle,
 } from "lucide-react";
 import { useReviews } from "../context/ReviewsContext";
-import { parseNpsImportCsv, NpsImportResult, NpsDetractorRow, computeNpsRates } from "../utils/csvParser";
+import { parseNpsImportCsv, NpsImportResult, NpsDetractorRow, computeNpsRates, classifyCategory } from "../utils/csvParser";
 import SchemaMismatchError from "./SchemaMismatchError";
 
 function formatWon(n: number): string {
   return `${n.toLocaleString()}원`;
+}
+
+// VOCAnaTab의 "NPS Detractor 피드백 카테고리 분석"과 동일한 classifyCategory 기준을 행 단위로도
+// 노출한다 — 집계 화면만 보고 워치리스트로 다시 넘어와 "이 사람이 왜 이탈위험인지" 찾아야 하는
+// 왕복을 없애기 위함. 피드백이 없는 행은 분류 자체가 불가능하므로 "사유 미기재"로 구분한다.
+const CATEGORY_BADGE_STYLE: Record<string, string> = {
+  "품질/상태": "bg-rose-50 text-rose-700 border-rose-200",
+  "배송/포장": "bg-amber-50 text-amber-700 border-amber-200",
+  "상품구성/양": "bg-indigo-50 text-indigo-700 border-indigo-200",
+  "서비스/시스템": "bg-emerald-50 text-emerald-700 border-emerald-200",
+};
+
+function getDetractorCategory(feedback?: string): string {
+  if (!feedback) return "사유 미기재";
+  return classifyCategory(feedback, 0, undefined);
 }
 
 type ViewMode = "highValue" | "memberList";
@@ -21,6 +36,7 @@ export default function NpsWatchlistWidget() {
   } = useReviews();
 
   const [viewMode, setViewMode] = useState<ViewMode>("highValue");
+  const [visibleCount, setVisibleCount] = useState(20);
   const [showModal, setShowModal] = useState(false);
   const [activeImportTab, setActiveImportTab] = useState<"file" | "paste">("file");
   const [csvRawText, setCsvRawText] = useState("");
@@ -291,7 +307,7 @@ export default function NpsWatchlistWidget() {
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-2">
               <button
-                onClick={() => setViewMode("highValue")}
+                onClick={() => { setViewMode("highValue"); setVisibleCount(20); }}
                 className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${
                   viewMode === "highValue" ? "bg-rose-600 text-white shadow-2xs" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
                 }`}
@@ -299,13 +315,18 @@ export default function NpsWatchlistWidget() {
                 고액구매 이탈위험 ({highValueList.length})
               </button>
               <button
-                onClick={() => setViewMode("memberList")}
+                onClick={() => { setViewMode("memberList"); setVisibleCount(20); }}
                 className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${
                   viewMode === "memberList" ? "bg-rose-600 text-white shadow-2xs" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
                 }`}
               >
                 회원 Detractor 전체 ({memberDedupedList.length})
               </button>
+              {activeList.some(r => r.score === null) && (
+                <span className="inline-flex items-center gap-1 rounded-xl px-3 py-1.5 text-[11px] font-bold bg-amber-50 text-amber-700 border border-amber-200">
+                  점수 미입력 고객 {activeList.filter(r => r.score === null).length.toLocaleString()}명
+                </span>
+              )}
             </div>
 
             {viewMode === "highValue" && (
@@ -341,6 +362,7 @@ export default function NpsWatchlistWidget() {
                   <th className="px-3 py-2.5 text-center font-bold text-slate-500">구매횟수</th>
                   <th className="px-3 py-2.5 text-right font-bold text-slate-500">총구매비용</th>
                   <th className="px-3 py-2.5 text-left font-bold text-slate-500">최근구매상품</th>
+                  <th className="px-3 py-2.5 text-left font-bold text-slate-500">불만유형</th>
                   <th className="px-3 py-2.5 text-left font-bold text-slate-500">피드백</th>
                   <th className="px-3 py-2.5 text-center font-bold text-slate-500">응답일</th>
                   <th className="px-3 py-2.5 text-center font-bold text-slate-500">컨택</th>
@@ -348,8 +370,8 @@ export default function NpsWatchlistWidget() {
               </thead>
               <tbody className="divide-y divide-slate-100 bg-white">
                 {activeList.length === 0 ? (
-                  <tr><td colSpan={8} className="px-3 py-8 text-center text-slate-400">조건에 맞는 대상이 없습니다.</td></tr>
-                ) : activeList.map((row: NpsDetractorRow) => {
+                  <tr><td colSpan={9} className="px-3 py-8 text-center text-slate-400">조건에 맞는 대상이 없습니다.</td></tr>
+                ) : activeList.slice(0, visibleCount).map((row: NpsDetractorRow) => {
                   const isContacted = npsContactedIds.has(row.id);
                   return (
                     <tr key={row.id} className={isContacted ? "bg-slate-50/40" : ""}>
@@ -361,6 +383,16 @@ export default function NpsWatchlistWidget() {
                       <td className="px-3 py-2.5 text-center font-bold text-slate-700">{row.purchaseCount}회</td>
                       <td className="px-3 py-2.5 text-right font-bold text-slate-700">{formatWon(row.totalPurchaseAmount)}</td>
                       <td className="px-3 py-2.5 text-slate-600 max-w-[140px] truncate">{row.lastPurchaseProduct || "-"}</td>
+                      <td className="px-3 py-2.5">
+                        {(() => {
+                          const cat = getDetractorCategory(row.feedback);
+                          return (
+                            <span className={`inline-flex items-center rounded-md px-2 py-0.5 text-[10px] font-bold border whitespace-nowrap ${CATEGORY_BADGE_STYLE[cat] || "bg-slate-50 text-slate-500 border-slate-200"}`}>
+                              {cat}
+                            </span>
+                          );
+                        })()}
+                      </td>
                       <td className="px-3 py-2.5 text-slate-500 max-w-[220px]">
                         <span className="line-clamp-2">{row.feedback || "-"}</span>
                       </td>
@@ -382,6 +414,17 @@ export default function NpsWatchlistWidget() {
               </tbody>
             </table>
           </div>
+
+          {activeList.length > visibleCount && (
+            <div className="flex justify-center pt-2">
+              <button
+                onClick={() => setVisibleCount(prev => prev + 20)}
+                className="inline-flex items-center justify-center rounded-lg border border-slate-200 bg-white px-6 py-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 hover:text-slate-900 shadow-xs cursor-pointer transition"
+              >
+                더 보기 ({visibleCount} / {activeList.length})
+              </button>
+            </div>
+          )}
         </>
       )}
     </div>

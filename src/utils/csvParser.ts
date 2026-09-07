@@ -1731,8 +1731,11 @@ export function parseNpsImportCsv(csvText: string): NpsImportResult {
     { key: "isMember", test: (col) => col.includes("회원") },
     { key: "email", test: (col) => col.includes("이메일") || col.includes("email") },
     { key: "purchaseCount", test: (col) => col.includes("구매횟수") || col.includes("구매 횟수") || col.replace(/\s|_/g, "").includes("purchasecount") },
-    { key: "totalPurchaseAmount", test: (col) => col.includes("총구매") || col.includes("구매비용") || col.includes("구매금액") || col.replace(/\s|_/g, "").includes("totalpurchase") },
-    { key: "lastPurchaseProduct", test: (col) => col.includes("최근구매") || col.includes("구매상품") || (col.includes("product") && !col.includes("count")) },
+    // 실제 ARES export 헤더는 "총 구매 비용"/"최근 구매 상품"처럼 단어 사이에 공백이 들어있다
+    // (예전엔 공백 없는 형태만 체크해서 매칭 자체가 안 됐음 — 실측으로 확인된 사고). 공백을 지우고
+    // 비교해 어느 쪽이든 잡히게 한다.
+    { key: "totalPurchaseAmount", test: (col) => { const c = col.replace(/\s|_/g, ""); return c.includes("총구매") || c.includes("구매비용") || c.includes("구매금액") || c.includes("totalpurchase"); } },
+    { key: "lastPurchaseProduct", test: (col) => { const c = col.replace(/\s|_/g, ""); return c.includes("최근구매") || c.includes("구매상품") || (c.includes("product") && !c.includes("count")); } },
     { key: "score", test: (col) => col.includes("점수") || col === "score" || col === "nps" },
     { key: "feedback", test: (col) => col.includes("피드백") || col.includes("feedback") || col.includes("의견") },
   ];
