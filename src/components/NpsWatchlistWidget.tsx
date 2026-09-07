@@ -353,9 +353,9 @@ export default function NpsWatchlistWidget() {
             </div>
           )}
 
-          <div className="overflow-x-auto rounded-2xl border border-slate-100">
+          <div className="max-h-[420px] overflow-auto rounded-2xl border border-slate-100">
             <table className="min-w-full divide-y divide-slate-100 text-xs">
-              <thead className="bg-slate-50">
+              <thead className="sticky top-0 z-10 bg-slate-50">
                 <tr>
                   <th className="px-3 py-2.5 text-left font-bold text-slate-500">이메일</th>
                   <th className="px-3 py-2.5 text-center font-bold text-slate-500">점수</th>
