@@ -4,8 +4,13 @@ import { ItemWeeklyClaimRow } from "../utils/claimCostEngine";
 
 const DEFAULT_VISIBLE_WEEKS = 16;
 const DEFAULT_TOP_N = 20;
+// "최근활동순" 정렬 기준 — 최근 2주(이번주 개념과 동일하게) 합산. 이 위젯의 목적이 "최근에 튄 상품
+// 찾기"인데 기본 정렬이 전체기간 누적 top20이면, 최근 처음 터진 상품이 누적건수가 적어 화면 밖으로
+// 밀려나 안 보이는 문제가 실측으로 확인됨(64건 중 24건이 top20 밖 상품 것이었음).
+const RECENT_WINDOW_WEEKS = 2;
 
 type Metric = "count" | "share";
+type SortMode = "recent" | "total";
 
 // 단일 색상(로즈) 명도 스케일만 사용 — 여러 색을 섞은 무지개 히트맵은 절대 안 쓴다(magnitude 인코딩
 // 원칙). 이 프로젝트에서 이미 위험/경고를 나타낼 때 쓰는 로즈/레드 계열과 통일. 0은 배경 없음(=값 없음),
@@ -35,13 +40,26 @@ export default function ItemWeeklyClaimHeatmap({
   weekStarts: string[];
 }) {
   const [metric, setMetric] = useState<Metric>("count");
+  const [sortMode, setSortMode] = useState<SortMode>("recent");
   const [viewMode, setViewMode] = useState<"heatmap" | "table">("heatmap");
   const [showAllWeeks, setShowAllWeeks] = useState(false);
   const [showAllItems, setShowAllItems] = useState(false);
 
   const firstVisibleWeekIdx = showAllWeeks ? 0 : Math.max(0, weekStarts.length - DEFAULT_VISIBLE_WEEKS);
   const visibleWeekStarts = weekStarts.slice(firstVisibleWeekIdx);
-  const visibleRows = showAllItems ? rows : rows.slice(0, DEFAULT_TOP_N);
+
+  // 정렬 기준(전체건수 누적 vs 최근 N주 합)에 따라 순서만 다시 매긴다 — weeks 배열 자체는 그대로라
+  // 실제 주차별 값은 정렬과 무관하게 항상 정확하다.
+  const sortedRows = useMemo(() => {
+    if (sortMode === "total") return rows;
+    return [...rows].sort((a, b) => {
+      const recentSum = (r: ItemWeeklyClaimRow) => r.weeks.slice(-RECENT_WINDOW_WEEKS).reduce((s, w) => s + w.count, 0);
+      const diff = recentSum(b) - recentSum(a);
+      return diff !== 0 ? diff : b.totalCount - a.totalCount;
+    });
+  }, [rows, sortMode]);
+
+  const visibleRows = showAllItems ? sortedRows : sortedRows.slice(0, DEFAULT_TOP_N);
 
   const maxValue = useMemo(() => {
     let max = 0;
@@ -71,13 +89,33 @@ export default function ItemWeeklyClaimHeatmap({
           <div>
             <h3 className="text-sm font-bold text-slate-900">상품 × 주차 사고접수 히트맵</h3>
             <p className="text-[11px] text-slate-400 mt-0.5">
-              특정 상품의 사고접수가 최근 몇 주 사이 튀었는지, 원래 꾸준했는지 한눈에 파악. 사고접수건수 상위{" "}
+              특정 상품의 사고접수가 최근 몇 주 사이 튀었는지, 원래 꾸준했는지 한눈에 파악. {sortMode === "recent" ? `최근 ${RECENT_WINDOW_WEEKS}주 활동` : "전체기간 누적"} 기준 상위{" "}
               {Math.min(rows.length, DEFAULT_TOP_N)}개 상품 기본 표시 · 접수일 기준 월요일 시작 주차.
             </p>
           </div>
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
+          <div className="flex bg-slate-100 rounded-xl p-1 gap-1">
+            <button
+              onClick={() => setSortMode("recent")}
+              title={`최근 ${RECENT_WINDOW_WEEKS}주 활동이 많은 상품부터 — 지금 막 튀기 시작한 상품도 놓치지 않음`}
+              className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition cursor-pointer ${
+                sortMode === "recent" ? "bg-white shadow-2xs text-rose-700" : "text-slate-400 hover:text-slate-600"
+              }`}
+            >
+              최근활동순
+            </button>
+            <button
+              onClick={() => setSortMode("total")}
+              title="전체 업로드 기간 누적 건수가 많은 상품부터"
+              className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition cursor-pointer ${
+                sortMode === "total" ? "bg-white shadow-2xs text-rose-700" : "text-slate-400 hover:text-slate-600"
+              }`}
+            >
+              전체기간순
+            </button>
+          </div>
           <div className="flex bg-slate-100 rounded-xl p-1 gap-1">
             <button
               onClick={() => setMetric("count")}
