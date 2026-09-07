@@ -488,6 +488,12 @@ export interface ItemDailyAccidentRow {
   item: string;
   totalCount: number; // 전체 기간 합계 — 정렬 및 Top20 선별 기준
   days: ItemDailyAccidentCell[]; // dates와 동일한 순서(오름차순)로 상품마다 전체 일자 채움(0 포함)
+  // 이 상품의 전체 주문건수 대비 사고접수 비율(%) — orderItems를 안 넘기면 undefined.
+  // ⚠️ computeProductClaimStats의 클레임율과 다르다: 여기는 ProblemForm↔OrderItem을 주문번호로
+  // 정밀 조인하지 않고(그 조인은 이 위젯이 의도적으로 안 쓰기로 한 부분), 그냥 "상품별 사고접수
+  // 원시 건수 ÷ 상품별 전체 주문건수"로 근사한 값이다 — 참고용 비율이지 확정 클레임율이 아니다.
+  claimRate?: number;
+  orderCount?: number;
 }
 
 // 대시보드의 "월요일 시작" 주차 정의와 통일 — ReviewsContext.tsx의 weekRanges 계산과 동일한 산식
@@ -520,8 +526,9 @@ function weekOfYearLabel(weekStart: Date): string {
 
 const WEEKDAY_LABELS = ["일", "월", "화", "수", "목", "금", "토"];
 
-// 상품별·일자별 "사고접수" 건수 + 그날 전체 사고접수 중 비중을 계산한다 — "사고접수" 탭 전용.
-// ProblemForm 자체의 접수일(receivedDate)·상품명(productName)만 쓴다(OrderItem 조인 불필요).
+// 상품별·일자별 "사고접수" 건수 + 그날 전체 사고접수 중 비중을 계산한다 — "매출/클레임비용" 탭.
+// ProblemForm 자체의 접수일(receivedDate)·상품명(productName)만 쓴다(일자별 집계 자체엔 OrderItem
+// 조인 불필요). orderItems를 넘기면 상품별 "전체건수 대비 클레임율" 요약도 함께 계산한다(아래 참고).
 //
 // ⚠️ 주 단위가 아니라 "일" 단위인 이유(실측으로 확인됨): 이 CS 업로드는 대개 최근 1~2주치 증분
 // 파일만 올라오는 경우가 많다(실제로 어드민 export가 그런 형태로 나옴). 그런데 주 단위로 묶으면
@@ -530,12 +537,22 @@ const WEEKDAY_LABELS = ["일", "월", "화", "수", "목", "금", "토"];
 // 단위 해상도 자체가 너무 거칠다. 이 앱에 이미 있는 "최근 14일 일별 트렌드" 차트와 같은 원칙으로
 // 일 단위로 바꿔서, 며칠치만 올려도 날짜별로 펼쳐져 패턴이 보이게 한다.
 //
-// (참고: 결제일이 아니라 접수일 기준인 것도 실측으로 확인된 별개의 이유 — 이 히트맵은 "언제
-// 접수됐나"를 보는 CS/품질 모니터링용이라, 결제월 귀속을 쓰는 매출/클레임비용 탭과는 숫자가
-// 원래 다르게 나오는 게 의도된 것이다.)
+// (참고: 셀 자체는 결제일이 아니라 접수일 기준 — 이 히트맵은 "언제 접수됐나"를 보는 CS/품질
+// 모니터링용이라, 결제월 귀속을 쓰는 이 탭의 다른 표들과는 숫자가 원래 다르게 나오는 게 의도된
+// 것이다. "전체건수 비중(%)"도 그날 전체 사고접수 중 이 상품 비중이지, 주문건수 대비 발생률이
+// 아니다 — 그 발생률(클레임율)은 아래 orderCount/claimRate로 별도 제공한다.)
 export function computeItemDailyAccidentPivot(
-  problemForms: ProblemForm[]
+  problemForms: ProblemForm[],
+  orderItems: OrderItem[] = []
 ): { rows: ItemDailyAccidentRow[]; dates: string[] } {
+  // 상품별 전체 주문건수(재발송 제외, 전체 업로드 기간) — 클레임율의 분모.
+  const orderCountByProduct = new Map<string, number>();
+  orderItems.forEach(o => {
+    if (o.isReshipCost || !o.paymentDate) return;
+    const base = (o.product || "").split("/")[0].trim();
+    if (!base) return;
+    orderCountByProduct.set(base, (orderCountByProduct.get(base) || 0) + 1);
+  });
   // product -> date(YYYY.MM.DD) -> count
   const byProductDate = new Map<string, Map<string, number>>();
   // date -> 그날 전체 사고접수건수(모든 상품 합)
@@ -576,7 +593,9 @@ export function computeItemDailyAccidentPivot(
         shareOfDayTotal: dayTotal > 0 ? Math.round((count / dayTotal) * 1000) / 10 : 0,
       };
     });
-    return { item, totalCount, days };
+    const orderCount = orderCountByProduct.get(item);
+    const claimRate = orderCount ? Math.round((totalCount / orderCount) * 1000) / 10 : undefined;
+    return { item, totalCount, days, orderCount, claimRate };
   });
 
   rows.sort((a, b) => b.totalCount - a.totalCount);

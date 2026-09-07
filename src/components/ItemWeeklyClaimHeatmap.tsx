@@ -180,6 +180,9 @@ export default function ItemWeeklyClaimHeatmap({
               <th className="py-2 px-3 font-bold text-slate-500 border-b border-slate-200 text-right whitespace-nowrap">
                 전체건수
               </th>
+              <th className="py-2 px-3 font-bold text-slate-500 border-b border-slate-200 text-right whitespace-nowrap" title="이 상품의 전체 주문건수 대비 사고접수 비율(참고용 근사치 — computeProductClaimStats의 확정 클레임율과는 다름)">
+                클레임율
+              </th>
               {visibleDates.map(d => (
                 <th key={d} className="py-2 px-1.5 font-bold text-slate-400 border-b border-slate-200 text-center whitespace-nowrap" style={{ minWidth: 56 }}>
                   {d.slice(5)}
@@ -198,6 +201,12 @@ export default function ItemWeeklyClaimHeatmap({
                   {row.item}
                 </td>
                 <td className="py-1.5 px-3 text-right font-mono text-slate-500">{row.totalCount}건</td>
+                <td className="py-1.5 px-3 text-right font-mono text-slate-500">
+                  {row.claimRate !== undefined ? `${row.claimRate}%` : "-"}
+                  {row.orderCount !== undefined && (
+                    <span className="text-slate-300"> ({row.orderCount}건 중)</span>
+                  )}
+                </td>
                 {row.days.slice(firstVisibleDayIdx).map((d, i) => {
                   const value = metric === "count" ? d.count : d.shareOfDayTotal;
                   if (viewMode === "table") {

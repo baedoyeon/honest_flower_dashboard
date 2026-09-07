@@ -19,11 +19,12 @@ import {
 } from "../utils/csvParser";
 import {
   computeMonthlyStats, computeDailyTrend, computeHandlingMethodStats, computeProductClaimStats,
-  computeSalesSkuStats, computeMethodBreakdownByWeek,
+  computeSalesSkuStats, computeMethodBreakdownByWeek, computeItemDailyAccidentPivot,
   verifyAccidentScopeReflectsRefund, verifyClaimCostAgainstCsExport,
   calcClaimRate, calcClaimCostPerSales, won, MonthlyClaimStat, ProductClaimStat
 } from "../utils/claimCostEngine";
 import MethodBreakdownTrendChart from "./MethodBreakdownTrendChart";
+import ItemWeeklyClaimHeatmap from "./ItemWeeklyClaimHeatmap";
 import DispatchFailureWidget from "./DispatchFailureWidget";
 import SchemaMismatchError from "./SchemaMismatchError";
 
@@ -248,6 +249,10 @@ export default function ClaimCostTab() {
   const allProductClaimStats = useMemo(() => computeProductClaimStats(orderItems, problemForms), [orderItems, problemForms]);
   const top3SkuClaims = useMemo(() => allProductClaimStats.slice(0, 3), [allProductClaimStats]);
   const accidentScopeCheck = useMemo(() => verifyAccidentScopeReflectsRefund(orderItems, problemForms), [orderItems, problemForms]);
+  // "상품 × 일자 사고접수 히트맵" — 사고접수 탭에 있다가 여기로 다시 옮김. 셀 자체(일자별 건수)는
+  // 여전히 ProblemForm 접수일 기준이라 이 탭의 다른 표(결제월 귀속)와 숫자가 안 맞을 수 있지만,
+  // 클레임율(orderCount 대비)을 보여주려면 OrderItem이 필요해서 이 탭이 자연스러운 위치다.
+  const itemDailyAccidentPivot = useMemo(() => computeItemDailyAccidentPivot(problemForms, orderItems), [problemForms, orderItems]);
 
   const years = useMemo(
     () => Array.from(new Set(monthlyStats.map(m => m.month.split("-")[0]))).sort(),
@@ -676,6 +681,8 @@ export default function ClaimCostTab() {
       </div>
 
       <ProductClaimTable stats={productClaimStatsThisMonth} monthLabel={latest?.label ?? "이번달"} />
+
+      <ItemWeeklyClaimHeatmap rows={itemDailyAccidentPivot.rows} dates={itemDailyAccidentPivot.dates} />
 
       {/* 14일 일별 트렌드 */}
       <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
