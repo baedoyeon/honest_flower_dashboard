@@ -104,7 +104,12 @@ export default function ClaimCostTab() {
   const [isParsingCSV, setIsParsingCSV] = useState(false);
   const [orderParsedResult, setOrderParsedResult] = useState<OrderItemParseResult | null>(null);
   const [pfParsedResult, setPfParsedResult] = useState<ProblemFormParseResult | null>(null);
-  const [importMode, setImportMode] = useState<"append" | "replace">("replace");
+  // 기본값을 "기존 병합(append)"으로 둔다 — 실제 어드민 export가 매번 전체 이력이 아니라 최근
+  // 며칠치만 담긴 좁은 범위 파일인 경우가 흔한데(실측으로 확인됨), "전체 교체"가 기본이면 그런
+  // 파일을 무심코 올릴 때마다 그동안 쌓인 전체 이력이 조용히 사라져버린다 — 실제로 이 문제로
+  // "히트맵/전체현황이 반영이 안 된다"는 보고가 있었음(사실은 새 데이터가 아니라 기존 데이터가
+  // 통째로 사라진 것). "전체 교체"는 사용자가 명시적으로 선택해야만 쓰이게 한다.
+  const [importMode, setImportMode] = useState<"append" | "replace">("append");
   const [importSuccessMsg, setImportSuccessMsg] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   // ProblemForm CSV는 "사고접수" 탭의 Incident 데이터와도 동기화한다(같은 파일을 두 파서에 모두
@@ -179,6 +184,12 @@ export default function ClaimCostTab() {
   const handleApplyCurrent = async () => {
     if (csvKind === "orderItem") {
       if (!orderParsedResult || orderParsedResult.orderItems.length === 0) return;
+      if (importMode === "replace" && orderItems.length > 0) {
+        const ok = window.confirm(
+          `"전체 교체"를 선택하셨습니다. 지금 저장된 주문(OrderItem) ${orderItems.length.toLocaleString()}건이 전부 사라지고 이번에 올린 ${orderParsedResult.validCount.toLocaleString()}건으로 완전히 대체됩니다.\n\n보통은 "기존 병합"이 맞습니다 — 정말 전체 교체하시겠습니까?`
+        );
+        if (!ok) return;
+      }
       await importOrderItems(orderParsedResult.orderItems, importMode === "replace");
       setImportSuccessMsg(`주문 데이터 ${orderParsedResult.validCount}건이 반영되었습니다!`);
       setTimeout(() => {
@@ -188,6 +199,12 @@ export default function ClaimCostTab() {
       }, 2000);
     } else {
       if (!pfParsedResult || pfParsedResult.problemForms.length === 0) return;
+      if (importMode === "replace" && problemForms.length > 0) {
+        const ok = window.confirm(
+          `"전체 교체"를 선택하셨습니다. 지금 저장된 사고접수(ProblemForm) ${problemForms.length.toLocaleString()}건이 전부 사라지고 이번에 올린 ${pfParsedResult.validCount.toLocaleString()}건으로 완전히 대체됩니다.\n\n보통은 "기존 병합"이 맞습니다 — 정말 전체 교체하시겠습니까?`
+        );
+        if (!ok) return;
+      }
       await importProblemForms(pfParsedResult.problemForms, importMode === "replace");
 
       // 같은 CSV를 사고접수 탭의 Incident 파서로도 돌려서 함께 반영 — 업로드 지점이 어디든
