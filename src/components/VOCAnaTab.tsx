@@ -10,7 +10,7 @@ function formatWon(n: number): string {
 }
 
 export default function VOCAnaTab() {
-  const { weeklyReviews: reviewsData, npsDetractorRows, setActiveTab } = useReviews();
+  const { weeklyReviews: reviewsData, npsDetractorRows, npsPurchaseTierStats, setActiveTab } = useReviews();
   const [activeGuideTab, setActiveGuideTab] = useState<"categories" | "judgment" | "patterns">("categories");
 
   // 1. Dynamic aggregation of categories and their ratings
@@ -81,6 +81,23 @@ export default function VOCAnaTab() {
       breakdown: categories.map(cat => ({ name: cat, count: counts[cat], revenue: revenue[cat], samples: samples[cat] })).sort((a, b) => b.revenue - a.revenue)
     };
   }, [npsDetractorRows]);
+
+  // Part F 지표 #2 — 구매빈도 등급별 이탈률. "Detractor가 몇 명이냐"가 아니라 "우리 단골 고객의
+  // 이탈률이 신규 고객보다 높은가"를 봐야 더 급한 신호를 잡아낼 수 있다(사용자 요청). 전체 평균
+  // 대비 어느 등급이 더 위험한지 비교하려고 전체 이탈률도 같이 계산한다.
+  const purchaseTierRateStats = useMemo(() => {
+    const overallTotal = npsPurchaseTierStats.reduce((s, t) => s + t.total, 0);
+    const overallDetractors = npsPurchaseTierStats.reduce((s, t) => s + t.detractors, 0);
+    const overallRate = overallTotal > 0 ? Math.round((overallDetractors / overallTotal) * 1000) / 10 : 0;
+    return {
+      overallTotal,
+      overallRate,
+      tiers: npsPurchaseTierStats.map(t => ({
+        ...t,
+        rate: t.total > 0 ? Math.round((t.detractors / t.total) * 1000) / 10 : 0
+      }))
+    };
+  }, [npsPurchaseTierStats]);
 
   // 2. Identify Top 3 categories of concern based on '비추천' counts
   const topConcernCategories = useMemo(() => {
@@ -331,6 +348,30 @@ export default function VOCAnaTab() {
                   </div>
                   <p className="text-2xl font-black text-rose-700">{formatWon(detractorCategoryStats.totalRevenueAtRisk)}</p>
                 </div>
+
+                {purchaseTierRateStats.overallTotal > 0 && (
+                  <div className="mb-4 rounded-2xl border border-slate-200 bg-white p-4">
+                    <div className="flex items-baseline justify-between mb-3">
+                      <p className="text-xs font-bold text-slate-800">구매빈도 등급별 이탈률</p>
+                      <p className="text-[11px] text-slate-400">전체 평균 <span className="font-bold text-slate-600">{purchaseTierRateStats.overallRate}%</span></p>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-5">
+                      {purchaseTierRateStats.tiers.map(t => {
+                        const isAboveAvg = t.total > 0 && t.rate > purchaseTierRateStats.overallRate;
+                        return (
+                          <div
+                            key={t.tier}
+                            className={`rounded-xl border p-3 text-center ${isAboveAvg ? "border-rose-200 bg-rose-50/50" : "border-slate-100 bg-slate-50/40"}`}
+                          >
+                            <p className="text-[10px] font-bold text-slate-500">{t.tier}</p>
+                            <p className={`text-lg font-black mt-1 ${isAboveAvg ? "text-rose-700" : "text-slate-700"}`}>{t.rate}%</p>
+                            <p className="text-[9px] text-slate-400 mt-0.5">{t.detractors.toLocaleString()} / {t.total.toLocaleString()}명</p>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
 
                 <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50/60 p-3 flex items-start gap-2">
                   <AlertTriangle className="h-3.5 w-3.5 text-amber-600 shrink-0 mt-0.5" />

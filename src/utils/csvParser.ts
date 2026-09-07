@@ -1649,6 +1649,30 @@ export interface NpsSummary {
   asOf?: string;
 }
 
+// 구매빈도 등급 — "고빈도 구매자(단골)일수록 이탈률이 더 높은가"를 보려면 Detractor만 봐선 안 되고
+// 전체 응답자를 등급별로 나눈 분모가 있어야 한다. 구간은 서로 겹치지 않게(총합 = validCount) 정의.
+// ⚠️ min:0 등급은 라벨을 "0회"라고 쓰면 안 된다(실측으로 확인됨) — 실제 CSV에 "구매 횟수"가
+// 리터럴 0으로 찍힌 행은 단 한 건도 없고, 이 등급은 전부 공란(구매이력이 연결 안 된 응답, 회원/
+// 비회원 섞여있음)이다. "확인된 0회 구매"처럼 보이면 안 되므로 "미기재"로 명시한다.
+export const NPS_PURCHASE_TIERS = [
+  { label: "구매이력 미기재", min: 0, max: 0 },
+  { label: "1회", min: 1, max: 1 },
+  { label: "2~5회", min: 2, max: 5 },
+  { label: "6~10회", min: 6, max: 10 },
+  { label: "11회+", min: 11, max: Infinity },
+] as const;
+
+function purchaseTierLabel(purchaseCount: number): string {
+  const tier = NPS_PURCHASE_TIERS.find(t => purchaseCount >= t.min && purchaseCount <= t.max);
+  return tier ? tier.label : NPS_PURCHASE_TIERS[NPS_PURCHASE_TIERS.length - 1].label;
+}
+
+export interface NpsPurchaseTierStat {
+  tier: string;
+  total: number; // 그 등급 전체 응답 수(promoter+passive+detractor)
+  detractors: number; // 그 등급 중 Detractor 수
+}
+
 // promoterRate/passiveRate/detractorRate는 소수점 첫째자리 %, score는 표준 NPS 정의(프로모터% - 디트랙터%,
 // 정수로 반올림) 그대로다. 매번 이 함수로 계산해서 쓰고 파생값을 NpsSummary에 저장해두지 않는다 — 저장해두면
 // summary가 갱신될 때 파생값과 어긋날 위험이 있다.
@@ -1687,7 +1711,7 @@ export interface NpsDetractorRow {
   email?: string;
   isMember: boolean; // "회원/비회원" 컬럼. 비회원은 이메일이 구조적으로 없어 우선순위 5 매칭 대상에서 제외됨.
   score: number | null; // 0~6, 또는 점수 공란이었던 경우 null("미기재" — 그래도 Detractor로 합산됨)
-  purchaseCount: number;
+  purchaseCount: number; // CSV 공란도 0으로 저장됨 — "진짜 0회 구매"와 "구매이력 미연결"이 구분 안 됨(실측상 공란만 존재, 리터럴 0은 없음). 등급 표시는 NPS_PURCHASE_TIERS의 "구매이력 미기재" 라벨을 참고.
   totalPurchaseAmount: number;
   lastPurchaseProduct?: string;
   feedback?: string;
@@ -1706,6 +1730,7 @@ export interface NpsImportResult {
   summary: NpsSummary;
   detractorRows: NpsDetractorRow[]; // score 0~6 또는 공란인 행만(우선순위 2/4/5용)
   trend: NpsTrendPoint[]; // 생성일 기준 월별 집계(우선순위 3용)
+  purchaseTierStats: NpsPurchaseTierStat[]; // 구매빈도 등급별 전체응답/Detractor 수(NPS_PURCHASE_TIERS 순서)
   totalRows: number;
   validCount: number; // 유효하게 집계된 행 수(점수가 0~10 범위 밖인 오염 행만 제외)
   missingCriticalColumns: string[];
@@ -1718,7 +1743,7 @@ export function parseNpsImportCsv(csvText: string): NpsImportResult {
   if (rawRows.length === 0) {
     return {
       summary: { total: 0, promoters: 0, passives: 0, detractors: 0 },
-      detractorRows: [], trend: [], totalRows: 0, validCount: 0,
+      detractorRows: [], trend: [], purchaseTierStats: [], totalRows: 0, validCount: 0,
       missingCriticalColumns: [], isLikelyWrongFileType: false, detectedColumns: []
     };
   }
@@ -1749,6 +1774,7 @@ export function parseNpsImportCsv(csvText: string): NpsImportResult {
   const dataRows = hasHeader ? rawRows.slice(1) : rawRows;
   const detractorRows: NpsDetractorRow[] = [];
   const trendMap = new Map<string, { promoters: number; passives: number; detractors: number }>();
+  const tierMap = new Map<string, { total: number; detractors: number }>();
   let promoters = 0, passives = 0, detractors = 0, validCount = 0;
   let autoSeq = 1;
 
@@ -1767,6 +1793,15 @@ export function parseNpsImportCsv(csvText: string): NpsImportResult {
     }
     validCount++;
 
+    // 구매빈도는 promoter/passive/detractor 전부에서 필요하다(분모까지 있어야 등급별 이탈"률"이
+    // 나온다) — Detractor 상세 필드보다 먼저, 모든 행에 대해 계산한다.
+    const purchaseCountRaw = cols.purchaseCount !== -1 ? row[cols.purchaseCount] : "";
+    const purchaseCountNum = purchaseCountRaw ? parseInt(purchaseCountRaw.replace(/[^0-9-]/g, ""), 10) : 0;
+    const tier = purchaseTierLabel(isNaN(purchaseCountNum) ? 0 : purchaseCountNum);
+    const tierEntry = tierMap.get(tier) || { total: 0, detractors: 0 };
+    tierEntry.total++;
+    tierMap.set(tier, tierEntry);
+
     const respondedAt = cols.respondedAt !== -1 && row[cols.respondedAt] ? row[cols.respondedAt].trim() : undefined;
     const period = respondedAt ? normalizeDateStr(respondedAt).slice(0, 7).replace(".", "-") : "";
     const bucket = score !== null && score >= 9 ? "promoters" : score !== null && score >= 7 ? "passives" : "detractors";
@@ -1782,11 +1817,10 @@ export function parseNpsImportCsv(csvText: string): NpsImportResult {
 
     // Detractor(0~6점 또는 공란)만 상세 필드까지 채워서 보관(우선순위 2/4/5용)
     detractors++;
+    tierEntry.detractors++;
     const memberCell = cols.isMember !== -1 && row[cols.isMember] ? row[cols.isMember].trim() : "";
     const email = cols.email !== -1 && row[cols.email] ? row[cols.email].trim() : "";
     const isMember = memberCell ? !memberCell.includes("비회원") : Boolean(email);
-    const purchaseCountRaw = cols.purchaseCount !== -1 ? row[cols.purchaseCount] : "";
-    const purchaseCountNum = purchaseCountRaw ? parseInt(purchaseCountRaw.replace(/[^0-9-]/g, ""), 10) : 0;
     const totalAmountRaw = cols.totalPurchaseAmount !== -1 ? row[cols.totalPurchaseAmount] : "";
     const totalAmountNum = totalAmountRaw ? Math.round(parseFloat(totalAmountRaw.replace(/[^0-9.-]/g, ""))) : 0;
     const lastPurchaseProduct = cols.lastPurchaseProduct !== -1 && row[cols.lastPurchaseProduct] ? row[cols.lastPurchaseProduct].trim() : undefined;
@@ -1815,10 +1849,18 @@ export function parseNpsImportCsv(csvText: string): NpsImportResult {
     })
     .sort((a, b) => a.period.localeCompare(b.period));
 
+  // NPS_PURCHASE_TIERS 순서를 그대로 유지(맵 삽입 순서가 아니라) — 화면에서 항상 0회→11회+ 순으로
+  // 나오게 하기 위함. 데이터에 아예 없는 등급도 0/0으로 채워서 등급 목록이 항상 5개로 고정된다.
+  const purchaseTierStats: NpsPurchaseTierStat[] = NPS_PURCHASE_TIERS.map(t => {
+    const entry = tierMap.get(t.label) || { total: 0, detractors: 0 };
+    return { tier: t.label, total: entry.total, detractors: entry.detractors };
+  });
+
   return {
     summary: { total: validCount, promoters, passives, detractors },
     detractorRows,
     trend,
+    purchaseTierStats,
     totalRows: dataRows.length,
     validCount,
     missingCriticalColumns,

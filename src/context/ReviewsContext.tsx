@@ -4,7 +4,7 @@ import { Incident, initialIncidentsData } from "../data/initialIncidents";
 import { OrderItem, initialOrderItemsData } from "../data/orderItems";
 import { ProblemForm, initialProblemFormsData } from "../data/problemForms";
 import { ChatRoom, initialChatRoomsData } from "../data/chatRooms";
-import { CsCostExportRow, DispatchFailureRow, NpsSummary, NpsDetractorRow, NpsTrendPoint, NpsImportResult, classifyCategory, getDepartmentForCategory } from "../utils/csvParser";
+import { CsCostExportRow, DispatchFailureRow, NpsSummary, NpsDetractorRow, NpsTrendPoint, NpsPurchaseTierStat, NpsImportResult, classifyCategory, getDepartmentForCategory } from "../utils/csvParser";
 import { defaultCompanyHolidays } from "../data/companyHolidays";
 import { idbLoad, idbSave } from "../utils/idbStorage";
 import { DEFAULT_MONTHLY_CS_LABOR_COST_ALLOCATION_KRW } from "../utils/chatRoomEngine";
@@ -100,6 +100,10 @@ interface ReviewsContextType {
   npsSummary: NpsSummary;
   npsDetractorRows: NpsDetractorRow[];
   npsTrend: NpsTrendPoint[];
+  // 구매빈도 등급별 전체응답/Detractor 집계 — "단골일수록 이탈률이 더 높은가"를 보여주는 데 쓴다.
+  // NPS 원본 CSV 파싱 시점에만 계산되므로(34k+ 행을 계속 들고 있지 않음), 재업로드 전까지는
+  // 고정값이다(다른 npsXxx 값들과 동일한 제약).
+  npsPurchaseTierStats: NpsPurchaseTierStat[];
   applyNpsImport: (result: NpsImportResult) => void;
   // "연락완료" 컨택 상태 — npsDetractorRows.id를 키로 쓰는 별도 Set(리뷰의 resolvedActionIds와 동일
   // 패턴). 데이터 재업로드로 rows가 통째로 바뀌어도 이미 컨택한 고객의 완료 표시는 유지된다.
@@ -172,6 +176,7 @@ const NPS_DETRACTOR_ROWS_STORAGE_KEY = "honestflower_npsDetractorRows";
 const NPS_CONTACTED_IDS_STORAGE_KEY = "honestflower_npsContactedIds";
 const NPS_WATCHLIST_THRESHOLD_STORAGE_KEY = "honestflower_npsWatchlistThreshold";
 const NPS_TREND_STORAGE_KEY = "honestflower_npsTrend";
+const NPS_PURCHASE_TIER_STATS_STORAGE_KEY = "honestflower_npsPurchaseTierStats";
 const DEFAULT_NPS_WATCHLIST_THRESHOLD = 5;
 
 // 2026-09-03 ARES III 어드민 확인 스냅샷(NPS 78, total 34,211) — 실제 업로드 전까지의 초기 시드값.
@@ -464,6 +469,7 @@ export function ReviewsProvider({ children }: { children: React.ReactNode }) {
   const [npsContactedIds, setNpsContactedIds] = useState<Set<string>>(() => new Set(loadFromLocalStorage<string[]>(NPS_CONTACTED_IDS_STORAGE_KEY, [])));
   const [npsWatchlistThreshold, setNpsWatchlistThreshold] = useState<number>(() => loadFromLocalStorage(NPS_WATCHLIST_THRESHOLD_STORAGE_KEY, DEFAULT_NPS_WATCHLIST_THRESHOLD));
   const [npsTrend, setNpsTrend] = useState<NpsTrendPoint[]>(() => loadFromLocalStorage(NPS_TREND_STORAGE_KEY, []));
+  const [npsPurchaseTierStats, setNpsPurchaseTierStats] = useState<NpsPurchaseTierStat[]>(() => loadFromLocalStorage(NPS_PURCHASE_TIER_STATS_STORAGE_KEY, []));
   const [resolvedActionIds, setResolvedActionIds] = useState<Set<string>>(() => new Set(loadFromLocalStorage<string[]>(RESOLVED_ACTION_IDS_STORAGE_KEY, [])));
 
   // Dynamically compute deduplicated and image-merged reviews list for all metrics and components
@@ -618,6 +624,10 @@ export function ReviewsProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     saveToLocalStorage(NPS_TREND_STORAGE_KEY, npsTrend);
   }, [npsTrend]);
+
+  useEffect(() => {
+    saveToLocalStorage(NPS_PURCHASE_TIER_STATS_STORAGE_KEY, npsPurchaseTierStats);
+  }, [npsPurchaseTierStats]);
 
   useEffect(() => {
     saveToLocalStorage(RESOLVED_ACTION_IDS_STORAGE_KEY, Array.from(resolvedActionIds));
@@ -1043,6 +1053,7 @@ export function ReviewsProvider({ children }: { children: React.ReactNode }) {
     setNpsSummary({ ...result.summary, asOf: formatKSTDate(getKSTDate()) });
     setNpsDetractorRows(result.detractorRows);
     setNpsTrend(result.trend);
+    setNpsPurchaseTierStats(result.purchaseTierStats);
   };
 
   const toggleNpsContact = (id: string) => {
@@ -1152,6 +1163,7 @@ export function ReviewsProvider({ children }: { children: React.ReactNode }) {
       npsSummary,
       npsDetractorRows,
       npsTrend,
+      npsPurchaseTierStats,
       applyNpsImport,
       npsContactedIds,
       toggleNpsContact,
