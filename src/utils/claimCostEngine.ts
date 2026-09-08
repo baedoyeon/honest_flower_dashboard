@@ -824,6 +824,17 @@ export function computeSeasonalCompareMonths(today: Date = new Date()): { curren
   return { currentMonth: fmt(lastCompleted), priorMonth: fmt(priorToThat), yoyMonth: fmt(yoy) };
 }
 
+// 작년 참고 데이터는 두 경로로 들어올 수 있다: ① 배너 전용 업로드(yoyReferenceAggregates, 별도 저장)
+// ② 평소 쓰는 메인 임포터로 올려서 orderItems/problemForms에 이미 누적된 경우. 라이브 데이터에 그
+// 달 집계가 있으면 그쪽을 우선한다(실사용에서 후자로 올리는 경우가 더 자연스러움).
+export function resolveYoyAggregateSource(
+  currentAndPrior: ProductMonthAggregate[],
+  yoyReferenceAggregates: ProductMonthAggregate[],
+  yoyMonth: string
+): ProductMonthAggregate[] {
+  return currentAndPrior.some(a => a.month === yoyMonth) ? currentAndPrior : yoyReferenceAggregates;
+}
+
 // 실측(2026년 8월 데이터)으로 확인해 정한 임계값 — 클레임율만 보면 표본이 작은 상품(예: 3건 중
 // 1건=33%)이 노이즈로 낄 수 있어, 최소 주문건수·최소 사고접수건수를 같이 요구한다. 사용자 확인 후
 // 사고접수건수 최소치는 3에서 4로 상향(여유 마진).

@@ -21,7 +21,8 @@ import {
   computeMonthlyStats, computeDailyTrend, computeHandlingMethodStats, computeProductClaimStats,
   computeSalesSkuStats, computeMethodBreakdownByWeek, computeItemDailyAccidentPivot,
   verifyAccidentScopeReflectsRefund, verifyClaimCostAgainstCsExport,
-  calcClaimRate, calcClaimCostPerSales, won, MonthlyClaimStat, ProductClaimStat
+  calcClaimRate, calcClaimCostPerSales, won, MonthlyClaimStat, ProductClaimStat,
+  computeProductMonthAggregates, computeSeasonalCompareMonths, resolveYoyAggregateSource, ProductMonthAggregate
 } from "../utils/claimCostEngine";
 import MethodBreakdownTrendChart from "./MethodBreakdownTrendChart";
 import ItemWeeklyClaimHeatmap from "./ItemWeeklyClaimHeatmap";
@@ -736,6 +737,7 @@ const productSortValue = (s: ProductClaimStat, key: ProductSortKey) =>
 // 보여주는 조회 전용 표(택배사 정산 조정 입력은 Top3 위젯에만 있음, 여기엔 없음).
 // ============================================================================
 function ProductClaimTable({ stats, monthLabel }: { stats: ProductClaimStat[]; monthLabel: string }) {
+  const { orderItems, problemForms, yoyReferenceAggregates } = useReviews();
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<ProductSortKey>("claimCount");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
@@ -751,6 +753,28 @@ function ProductClaimTable({ stats, monthLabel }: { stats: ProductClaimStat[]; m
       return sortDir === "desc" ? -diff : diff;
     });
   }, [stats, search, sortKey, sortDir]);
+
+  // 검색어로 걸러진 행들이 전부 같은 기준상품(사이즈/색상 앞부분)이면, 그 상품의 이번달/전월/작년
+  // 동월 클레임율을 한눈에 보여주는 상세 패널을 띄운다 — 표에 컬럼을 항상 추가하는 대신 검색했을
+  // 때만 나타나서 평소엔 표가 지저분해지지 않는다.
+  const searchedProductDetail = useMemo(() => {
+    if (!search.trim() || filtered.length === 0) return null;
+    const baseNames = new Set(filtered.map(s => s.sku.split("/")[0].trim()));
+    if (baseNames.size !== 1) return null;
+    const baseName = Array.from(baseNames)[0];
+
+    const { currentMonth, priorMonth, yoyMonth } = computeSeasonalCompareMonths();
+    const currentAndPrior = computeProductMonthAggregates(orderItems, problemForms);
+    const yoySource = resolveYoyAggregateSource(currentAndPrior, yoyReferenceAggregates, yoyMonth);
+    const find = (arr: ProductMonthAggregate[], month: string) => arr.find(a => a.product === baseName && a.month === month);
+
+    return {
+      baseName,
+      current: { label: `이번달(${currentMonth})`, agg: find(currentAndPrior, currentMonth) },
+      prior: { label: `전월(${priorMonth})`, agg: find(currentAndPrior, priorMonth) },
+      yoy: { label: `작년 동월(${yoyMonth})`, agg: find(yoySource, yoyMonth) },
+    };
+  }, [search, filtered, orderItems, problemForms, yoyReferenceAggregates]);
 
   const handleSort = (key: ProductSortKey) => {
     if (sortKey === key) {
@@ -812,6 +836,27 @@ function ProductClaimTable({ stats, monthLabel }: { stats: ProductClaimStat[]; m
         />
         <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-400" />
       </div>
+
+      {searchedProductDetail && (
+        <div className="mb-4 rounded-xl border border-purple-200 bg-purple-50/50 p-3">
+          <p className="text-[11px] font-bold text-purple-800 mb-2">"{searchedProductDetail.baseName}" 기간별 클레임율</p>
+          <div className="grid grid-cols-3 gap-2">
+            {[searchedProductDetail.prior, searchedProductDetail.yoy, searchedProductDetail.current].map((period, i) => (
+              <div key={i} className={`rounded-lg bg-white px-2.5 py-1.5 border ${period === searchedProductDetail.current ? "border-purple-300" : "border-slate-100"}`}>
+                <p className={`text-[9px] font-bold ${period === searchedProductDetail.current ? "text-purple-500" : "text-slate-400"}`}>{period.label}</p>
+                {period.agg ? (
+                  <p className={`text-[11px] font-bold ${period === searchedProductDetail.current ? "text-purple-700" : "text-slate-600"}`}>
+                    {period.agg.orderCount > 0 ? Math.round((period.agg.accidentCount / period.agg.orderCount) * 1000) / 10 : 0}%{" "}
+                    <span className="text-slate-400 font-medium">({period.agg.accidentCount}/{period.agg.orderCount}건)</span>
+                  </p>
+                ) : (
+                  <p className="text-[11px] font-medium text-slate-300">데이터 없음</p>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {stats.length === 0 ? (
         <p className="text-xs text-slate-400 text-center py-12">{monthLabel}에 접수된 클레임이 없습니다.</p>

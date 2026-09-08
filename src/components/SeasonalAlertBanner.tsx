@@ -3,7 +3,8 @@ import { Bell, Upload, CheckCircle2, ArrowRight } from "lucide-react";
 import { useReviews } from "../context/ReviewsContext";
 import { parseCSVToOrderItems, parseCSVToProblemForms } from "../utils/csvParser";
 import {
-  computeProductMonthAggregates, computeSeasonalCompareMonths, computeSeasonalAlerts, SeasonalAlert
+  computeProductMonthAggregates, computeSeasonalCompareMonths, computeSeasonalAlerts, SeasonalAlert,
+  resolveYoyAggregateSource
 } from "../utils/claimCostEngine";
 import { OrderItem } from "../data/orderItems";
 import { ProblemForm } from "../data/problemForms";
@@ -31,8 +32,7 @@ export default function SeasonalAlertBanner() {
   // 데이터에 그 달 집계가 이미 있으면 그쪽을 우선 쓴다. 없을 때만 별도 저장된 참고 데이터로 대체.
   const { alerts, momDataSufficient, yoyDataSufficient, yoySource } = useMemo(() => {
     const currentAndPrior = computeProductMonthAggregates(orderItems, problemForms);
-    const liveHasYoyMonth = currentAndPrior.some(a => a.month === yoyMonth);
-    const yoySource = liveHasYoyMonth ? currentAndPrior : yoyReferenceAggregates;
+    const yoySource = resolveYoyAggregateSource(currentAndPrior, yoyReferenceAggregates, yoyMonth);
     const result = computeSeasonalAlerts(currentAndPrior, currentMonth, currentAndPrior, priorMonth, yoySource, yoyMonth);
     return { ...result, yoySource };
   }, [orderItems, problemForms, yoyReferenceAggregates, currentMonth, priorMonth, yoyMonth]);
