@@ -1,9 +1,9 @@
 import { useMemo, useRef, useState } from "react";
-import { Bell, Upload, CheckCircle2 } from "lucide-react";
+import { Bell, Upload, CheckCircle2, ArrowRight } from "lucide-react";
 import { useReviews } from "../context/ReviewsContext";
 import { parseCSVToOrderItems, parseCSVToProblemForms } from "../utils/csvParser";
 import {
-  computeProductMonthAggregates, computeSeasonalCompareMonths, computeSeasonalAlerts
+  computeProductMonthAggregates, computeSeasonalCompareMonths, computeSeasonalAlerts, SeasonalAlert
 } from "../utils/claimCostEngine";
 import { OrderItem } from "../data/orderItems";
 import { ProblemForm } from "../data/problemForms";
@@ -116,16 +116,7 @@ export default function SeasonalAlertBanner() {
         <div className="rounded-2xl border border-rose-200 bg-white p-3 space-y-2">
           <p className="text-xs font-bold text-rose-800">🔁 작년 {yoyMonth}에도 이슈였던 상품 ({yoyAlerts.length})</p>
           {yoyAlerts.map(a => (
-            <button
-              key={a.product}
-              onClick={() => setActiveTab("claimcost")}
-              className="w-full text-left flex items-center justify-between gap-2 rounded-xl bg-rose-50/60 px-3 py-2 hover:bg-rose-100 transition cursor-pointer"
-            >
-              <span className="text-xs font-bold text-slate-800">{a.product}</span>
-              <span className="text-[10px] text-slate-500">
-                {a.currentMonth} {a.currentClaimRate}%({a.currentAccidentCount}/{a.currentOrderCount}건) · {a.compareMonth} {a.compareClaimRate}%({a.compareAccidentCount}/{a.compareOrderCount}건)
-              </span>
-            </button>
+            <SeasonalAlertRow key={a.product} alert={a} compareLabel="작년 동월" onClick={() => setActiveTab("claimcost")} />
           ))}
         </div>
       )}
@@ -134,16 +125,7 @@ export default function SeasonalAlertBanner() {
         <div className="rounded-2xl border border-amber-200 bg-white p-3 space-y-2">
           <p className="text-xs font-bold text-amber-800">🆕 {priorMonth} 대비 새로 심각해진 상품 ({momAlerts.length})</p>
           {momAlerts.map(a => (
-            <button
-              key={a.product}
-              onClick={() => setActiveTab("claimcost")}
-              className="w-full text-left flex items-center justify-between gap-2 rounded-xl bg-amber-50/60 px-3 py-2 hover:bg-amber-100 transition cursor-pointer"
-            >
-              <span className="text-xs font-bold text-slate-800">{a.product}</span>
-              <span className="text-[10px] text-slate-500">
-                {a.currentMonth} {a.currentClaimRate}%({a.currentAccidentCount}/{a.currentOrderCount}건) · {a.compareMonth} {a.compareClaimRate}%({a.compareAccidentCount}/{a.compareOrderCount}건)
-              </span>
-            </button>
+            <SeasonalAlertRow key={a.product} alert={a} compareLabel="전월" onClick={() => setActiveTab("claimcost")} />
           ))}
         </div>
       )}
@@ -185,6 +167,34 @@ export default function SeasonalAlertBanner() {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+// compareClaimRate/currentClaimRate는 서로 독립된 두 달의 자체 클레임율(사고접수/주문)이지,
+// 한쪽이 다른 쪽의 비율(%)이 아니다 — "34%(0.5)" 처럼 한 줄에 붙여두면 그 둘의 관계로 오해하기
+// 쉬워서, 어느 달 수치인지 라벨을 달고 두 칸으로 분리해 보여준다.
+function SeasonalAlertRow({ alert, compareLabel, onClick }: { alert: SeasonalAlert; compareLabel: string; onClick: () => void }) {
+  return (
+    <div className="rounded-xl bg-slate-50 hover:bg-slate-100 transition px-3 py-2.5">
+      <button onClick={onClick} className="text-xs font-bold text-slate-800 hover:underline cursor-pointer">
+        {alert.product}
+      </button>
+      <div className="flex items-center gap-2 mt-1.5">
+        <div className="flex-1 rounded-lg bg-white px-2.5 py-1.5 border border-slate-100">
+          <p className="text-[9px] font-bold text-slate-400">{compareLabel} ({alert.compareMonth})</p>
+          <p className="text-[11px] font-bold text-slate-600">
+            {alert.compareClaimRate}% <span className="text-slate-400 font-medium">({alert.compareAccidentCount}/{alert.compareOrderCount}건)</span>
+          </p>
+        </div>
+        <ArrowRight className="h-3.5 w-3.5 text-slate-300 shrink-0" />
+        <div className="flex-1 rounded-lg bg-white px-2.5 py-1.5 border border-rose-100">
+          <p className="text-[9px] font-bold text-rose-400">이번달 ({alert.currentMonth})</p>
+          <p className="text-[11px] font-bold text-rose-700">
+            {alert.currentClaimRate}% <span className="text-slate-400 font-medium">({alert.currentAccidentCount}/{alert.currentOrderCount}건)</span>
+          </p>
+        </div>
+      </div>
     </div>
   );
 }
