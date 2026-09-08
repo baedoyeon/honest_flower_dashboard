@@ -23,15 +23,22 @@ export default function SeasonalAlertBanner() {
 
   const { currentMonth, priorMonth, yoyMonth } = useMemo(() => computeSeasonalCompareMonths(), []);
 
-  const { alerts, momDataSufficient, yoyDataSufficient } = useMemo(() => {
+  // 작년 데이터는 두 경로로 들어올 수 있다: ① 배너 전용 "작년 참고 데이터 올리기"(yoyReferenceAggregates,
+  // 원본 행 없이 집계만 저장) ② 평소 쓰는 메인 임포터로 그냥 올려서 orderItems/problemForms 안에 같이
+  // 누적된 경우 — 실사용에서 사용자가 후자로 올리는 게 자연스러워서(같은 CSV, 같은 버튼) 라이브
+  // 데이터에 그 달 집계가 이미 있으면 그쪽을 우선 쓴다. 없을 때만 별도 저장된 참고 데이터로 대체.
+  const { alerts, momDataSufficient, yoyDataSufficient, yoySource } = useMemo(() => {
     const currentAndPrior = computeProductMonthAggregates(orderItems, problemForms);
-    return computeSeasonalAlerts(currentAndPrior, currentMonth, currentAndPrior, priorMonth, yoyReferenceAggregates, yoyMonth);
+    const liveHasYoyMonth = currentAndPrior.some(a => a.month === yoyMonth);
+    const yoySource = liveHasYoyMonth ? currentAndPrior : yoyReferenceAggregates;
+    const result = computeSeasonalAlerts(currentAndPrior, currentMonth, currentAndPrior, priorMonth, yoySource, yoyMonth);
+    return { ...result, yoySource };
   }, [orderItems, problemForms, yoyReferenceAggregates, currentMonth, priorMonth, yoyMonth]);
 
   const yoyAlerts = alerts.filter(a => a.type === "yoy");
   const momAlerts = alerts.filter(a => a.type === "mom");
 
-  const hasYoyReferenceForThisMonth = yoyReferenceAggregates.some(a => a.month === yoyMonth);
+  const hasYoyReferenceForThisMonth = yoySource.some(a => a.month === yoyMonth);
   const yoyNote = !hasYoyReferenceForThisMonth
     ? `${yoyMonth} 참고 데이터 없음 — YoY 비교 불가`
     : !yoyDataSufficient
