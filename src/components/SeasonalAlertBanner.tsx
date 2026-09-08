@@ -112,14 +112,19 @@ export default function SeasonalAlertBanner() {
         </button>
       </div>
 
-      {yoyAlerts.length > 0 && (
+      {yoyAlerts.length > 0 ? (
         <div className="rounded-2xl border border-rose-200 bg-white p-3 space-y-2">
           <p className="text-xs font-bold text-rose-800">🔁 작년 {yoyMonth}에도 이슈였던 상품 ({yoyAlerts.length})</p>
           {yoyAlerts.map(a => (
             <SeasonalAlertRow key={a.product} alert={a} compareLabel="작년 동월" onClick={() => setActiveTab("claimcost")} />
           ))}
         </div>
-      )}
+      ) : !yoyNote ? (
+        // 비교가 안 돌아서(데이터 없음/부족) 조용한 것과, 비교는 정상적으로 돌았는데 겹치는 상품이
+        // 0건이라 조용한 것을 구분해서 보여준다 — 둘 다 "아무 표시 없음"이면 사용자 입장에서
+        // "원래 비교가 되긴 하는 건가?"라는 의심이 생김.
+        <p className="text-[11px] text-slate-400 px-1">🔁 작년 {yoyMonth} 동월엔 겹치는 이슈 없음 (비교 완료)</p>
+      ) : null}
 
       {momAlerts.length > 0 && (
         <div className="rounded-2xl border border-amber-200 bg-white p-3 space-y-2">
