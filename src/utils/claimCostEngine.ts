@@ -813,15 +813,27 @@ export function computeProductMonthAggregates(
   });
 }
 
+// month("YYYY-MM") 기준 "그 전달/작년 같은 달"을 계산한다 — 순수 월 산술이라 어떤 기준월이든
+// 재사용 가능(오늘 날짜와 무관).
+export function monthsRelativeTo(month: string): { priorMonth: string; yoyMonth: string } {
+  const [y, m] = month.split("-").map(Number);
+  const fmt = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  const prior = new Date(y, m - 2, 1);
+  const yoy = new Date(y - 1, m - 1, 1);
+  return { priorMonth: fmt(prior), yoyMonth: fmt(yoy) };
+}
+
 // 오늘 날짜 기준 "지난달(완료된 달)/그전달/작년 같은 달"을 동적으로 계산한다 — 하드코딩 안 함,
 // 달이 바뀌면 자동으로 따라간다. 이번달은 성숙 윈도우가 안 지나 잠정치라 비교 대상에서 뺀다.
+// (이 "완료된 달" 기준은 시즌 알림 배너 전용 — 특정 상품 검색 패널처럼 이미 화면에 표시 중인
+// 다른 달을 기준으로 봐야 하는 곳은 monthsRelativeTo()를 그 달에 직접 적용할 것.)
 export function computeSeasonalCompareMonths(today: Date = new Date()): { currentMonth: string; priorMonth: string; yoyMonth: string } {
   const y = today.getFullYear(), m = today.getMonth();
   const fmt = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
   const lastCompleted = new Date(y, m - 1, 1);
-  const priorToThat = new Date(y, m - 2, 1);
-  const yoy = new Date(lastCompleted.getFullYear() - 1, lastCompleted.getMonth(), 1);
-  return { currentMonth: fmt(lastCompleted), priorMonth: fmt(priorToThat), yoyMonth: fmt(yoy) };
+  const currentMonth = fmt(lastCompleted);
+  const { priorMonth, yoyMonth } = monthsRelativeTo(currentMonth);
+  return { currentMonth, priorMonth, yoyMonth };
 }
 
 // 작년 참고 데이터는 두 경로로 들어올 수 있다: ① 배너 전용 업로드(yoyReferenceAggregates, 별도 저장)

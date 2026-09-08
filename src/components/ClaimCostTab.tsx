@@ -22,7 +22,7 @@ import {
   computeSalesSkuStats, computeMethodBreakdownByWeek, computeItemDailyAccidentPivot,
   verifyAccidentScopeReflectsRefund, verifyClaimCostAgainstCsExport,
   calcClaimRate, calcClaimCostPerSales, won, MonthlyClaimStat, ProductClaimStat,
-  computeProductMonthAggregates, computeSeasonalCompareMonths, resolveYoyAggregateSource, ProductMonthAggregate
+  computeProductMonthAggregates, monthsRelativeTo, resolveYoyAggregateSource, ProductMonthAggregate
 } from "../utils/claimCostEngine";
 import MethodBreakdownTrendChart from "./MethodBreakdownTrendChart";
 import ItemWeeklyClaimHeatmap from "./ItemWeeklyClaimHeatmap";
@@ -681,7 +681,7 @@ export default function ClaimCostTab() {
 
       </div>
 
-      <ProductClaimTable stats={productClaimStatsThisMonth} monthLabel={latest?.label ?? "이번달"} />
+      <ProductClaimTable stats={productClaimStatsThisMonth} monthLabel={latest?.label ?? "이번달"} month={latest?.month} />
 
       <ItemWeeklyClaimHeatmap rows={itemDailyAccidentPivot.rows} dates={itemDailyAccidentPivot.dates} />
 
@@ -736,7 +736,7 @@ const productSortValue = (s: ProductClaimStat, key: ProductSortKey) =>
 // ProductClaimTable — "이번달 상품별 클레임 전체 현황". Top3 위젯과 달리 slice 없이 전체 상품을
 // 보여주는 조회 전용 표(택배사 정산 조정 입력은 Top3 위젯에만 있음, 여기엔 없음).
 // ============================================================================
-function ProductClaimTable({ stats, monthLabel }: { stats: ProductClaimStat[]; monthLabel: string }) {
+function ProductClaimTable({ stats, monthLabel, month }: { stats: ProductClaimStat[]; monthLabel: string; month?: string }) {
   const { orderItems, problemForms, yoyReferenceAggregates } = useReviews();
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<ProductSortKey>("claimCount");
@@ -758,15 +758,20 @@ function ProductClaimTable({ stats, monthLabel }: { stats: ProductClaimStat[]; m
   // 동월 클레임율을 한눈에 보여주는 상세 패널을 띄운다 — 표에 컬럼을 항상 추가하는 대신 검색했을
   // 때만 나타나서 평소엔 표가 지저분해지지 않는다.
   const searchedProductDetail = useMemo(() => {
-    if (!search.trim() || filtered.length === 0) return null;
+    if (!search.trim() || filtered.length === 0 || !month) return null;
     const baseNames = new Set(filtered.map(s => s.sku.split("/")[0].trim()));
     if (baseNames.size !== 1) return null;
     const baseName = Array.from(baseNames)[0];
 
-    const { currentMonth, priorMonth, yoyMonth } = computeSeasonalCompareMonths();
+    // 이 표 자체가 보여주는 달(month prop, 예: "9월"이면 latest.month="2026-09")을 기준으로
+    // 전월/작년 동월을 계산한다 — 오늘 날짜 기준 "지난 완료된 달"(computeSeasonalCompareMonths)을
+    // 쓰면, 이 표가 latest 데이터로 이미 최신 달(예: 9월)을 보여주는 중에도 검색 패널만 엉뚱하게
+    // 한 달 전(8월)을 "이번달"이라고 표시하는 불일치가 생김(실측으로 확인됨).
+    const currentMonth = month;
+    const { priorMonth, yoyMonth } = monthsRelativeTo(currentMonth);
     const currentAndPrior = computeProductMonthAggregates(orderItems, problemForms);
     const yoySource = resolveYoyAggregateSource(currentAndPrior, yoyReferenceAggregates, yoyMonth);
-    const find = (arr: ProductMonthAggregate[], month: string) => arr.find(a => a.product === baseName && a.month === month);
+    const find = (arr: ProductMonthAggregate[], m: string) => arr.find(a => a.product === baseName && a.month === m);
 
     return {
       baseName,
@@ -774,7 +779,7 @@ function ProductClaimTable({ stats, monthLabel }: { stats: ProductClaimStat[]; m
       prior: { label: `전월(${priorMonth})`, agg: find(currentAndPrior, priorMonth) },
       yoy: { label: `작년 동월(${yoyMonth})`, agg: find(yoySource, yoyMonth) },
     };
-  }, [search, filtered, orderItems, problemForms, yoyReferenceAggregates]);
+  }, [search, filtered, month, orderItems, problemForms, yoyReferenceAggregates]);
 
   const handleSort = (key: ProductSortKey) => {
     if (sortKey === key) {
