@@ -8,6 +8,7 @@ import { CsCostExportRow, DispatchFailureRow, NpsSummary, NpsDetractorRow, NpsTr
 import { defaultCompanyHolidays } from "../data/companyHolidays";
 import { idbLoad, idbSave } from "../utils/idbStorage";
 import { DEFAULT_MONTHLY_CS_LABOR_COST_ALLOCATION_KRW } from "../utils/chatRoomEngine";
+import { ProductMonthAggregate, computeProductMonthAggregates } from "../utils/claimCostEngine";
 
 // 어드민 사고접수 태깅 대분류(품질/출고/배송) + 기타불만 — ProductStatusTab의 "요주의 위크" 카드
 // 배지/브레이크다운 계산에 쓰인다. classifyCategory(리뷰 텍스트 키워드 매칭용, 품질/상태·배송/포장·
@@ -105,6 +106,11 @@ interface ReviewsContextType {
   // 고정값이다(다른 npsXxx 값들과 동일한 제약).
   npsPurchaseTierStats: NpsPurchaseTierStat[];
   applyNpsImport: (result: NpsImportResult) => void;
+  // YoY 시즌 알림용 "작년 데이터" — 원본 OrderItem/ProblemForm 행을 저장하지 않고 상품×월 집계
+  // (사고접수건수/주문건수)만 남긴다. 매번 업로드할 때마다 통째로 교체하지 않고 월 단위로 병합
+  // 갱신한다(같은 달을 다시 올리면 그 달만 덮어씀).
+  yoyReferenceAggregates: ProductMonthAggregate[];
+  importYoyReferenceData: (orderItems: OrderItem[], problemForms: ProblemForm[]) => void;
   // "연락완료" 컨택 상태 — npsDetractorRows.id를 키로 쓰는 별도 Set(리뷰의 resolvedActionIds와 동일
   // 패턴). 데이터 재업로드로 rows가 통째로 바뀌어도 이미 컨택한 고객의 완료 표시는 유지된다.
   npsContactedIds: Set<string>;
@@ -177,6 +183,7 @@ const NPS_CONTACTED_IDS_STORAGE_KEY = "honestflower_npsContactedIds";
 const NPS_WATCHLIST_THRESHOLD_STORAGE_KEY = "honestflower_npsWatchlistThreshold";
 const NPS_TREND_STORAGE_KEY = "honestflower_npsTrend";
 const NPS_PURCHASE_TIER_STATS_STORAGE_KEY = "honestflower_npsPurchaseTierStats";
+const YOY_REFERENCE_AGGREGATES_STORAGE_KEY = "honestflower_yoyReferenceAggregates";
 const DEFAULT_NPS_WATCHLIST_THRESHOLD = 5;
 
 // 2026-09-03 ARES III 어드민 확인 스냅샷(NPS 78, total 34,211) — 실제 업로드 전까지의 초기 시드값.
@@ -470,6 +477,7 @@ export function ReviewsProvider({ children }: { children: React.ReactNode }) {
   const [npsWatchlistThreshold, setNpsWatchlistThreshold] = useState<number>(() => loadFromLocalStorage(NPS_WATCHLIST_THRESHOLD_STORAGE_KEY, DEFAULT_NPS_WATCHLIST_THRESHOLD));
   const [npsTrend, setNpsTrend] = useState<NpsTrendPoint[]>(() => loadFromLocalStorage(NPS_TREND_STORAGE_KEY, []));
   const [npsPurchaseTierStats, setNpsPurchaseTierStats] = useState<NpsPurchaseTierStat[]>(() => loadFromLocalStorage(NPS_PURCHASE_TIER_STATS_STORAGE_KEY, []));
+  const [yoyReferenceAggregates, setYoyReferenceAggregates] = useState<ProductMonthAggregate[]>(() => loadFromLocalStorage(YOY_REFERENCE_AGGREGATES_STORAGE_KEY, []));
   const [resolvedActionIds, setResolvedActionIds] = useState<Set<string>>(() => new Set(loadFromLocalStorage<string[]>(RESOLVED_ACTION_IDS_STORAGE_KEY, [])));
 
   // Dynamically compute deduplicated and image-merged reviews list for all metrics and components
@@ -628,6 +636,10 @@ export function ReviewsProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     saveToLocalStorage(NPS_PURCHASE_TIER_STATS_STORAGE_KEY, npsPurchaseTierStats);
   }, [npsPurchaseTierStats]);
+
+  useEffect(() => {
+    saveToLocalStorage(YOY_REFERENCE_AGGREGATES_STORAGE_KEY, yoyReferenceAggregates);
+  }, [yoyReferenceAggregates]);
 
   useEffect(() => {
     saveToLocalStorage(RESOLVED_ACTION_IDS_STORAGE_KEY, Array.from(resolvedActionIds));
@@ -1056,6 +1068,17 @@ export function ReviewsProvider({ children }: { children: React.ReactNode }) {
     setNpsPurchaseTierStats(result.purchaseTierStats);
   };
 
+  // 2025년 등 "참고용" OrderItem/ProblemForm CSV를 그대로 파싱해서(기존 파서 재사용) 상품×월
+  // 집계만 뽑고 원본 행은 버린다 — 같은 달을 다시 올리면 그 달 집계만 덮어쓰고 나머지 달은 유지.
+  const importYoyReferenceData = (orderItems: OrderItem[], problemForms: ProblemForm[]) => {
+    const incoming = computeProductMonthAggregates(orderItems, problemForms);
+    const incomingMonths = new Set(incoming.map(a => a.month));
+    setYoyReferenceAggregates(prev => [
+      ...prev.filter(a => !incomingMonths.has(a.month)),
+      ...incoming,
+    ]);
+  };
+
   const toggleNpsContact = (id: string) => {
     setNpsContactedIds(prev => {
       const next = new Set(prev);
@@ -1164,6 +1187,8 @@ export function ReviewsProvider({ children }: { children: React.ReactNode }) {
       npsDetractorRows,
       npsTrend,
       npsPurchaseTierStats,
+      yoyReferenceAggregates,
+      importYoyReferenceData,
       applyNpsImport,
       npsContactedIds,
       toggleNpsContact,

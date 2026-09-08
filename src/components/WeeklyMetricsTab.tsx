@@ -5,6 +5,7 @@ import { useReviews, getGroupKeysMap } from "../context/ReviewsContext";
 import { computeNpsRates } from "../utils/csvParser";
 import NpsWatchlistWidget from "./NpsWatchlistWidget";
 import NpsTrendWidget from "./NpsTrendWidget";
+import SeasonalAlertBanner from "./SeasonalAlertBanner";
 import { useState, useMemo } from "react";
 
 export default function WeeklyMetricsTab() {
@@ -331,6 +332,8 @@ export default function WeeklyMetricsTab() {
       transition={{ duration: 0.4 }}
       className="space-y-6"
     >
+      <SeasonalAlertBanner />
+
       {/* Active Product Filter Alert Banner */}
       {metricsProductFilter && (
         <div className="bg-brand-green-light border border-brand-green/20 rounded-3xl p-5 shadow-xs flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">

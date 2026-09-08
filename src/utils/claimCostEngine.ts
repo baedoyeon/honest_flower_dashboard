@@ -753,3 +753,171 @@ export function verifyClaimCostAgainstCsExport(
 
   return { periodStart, periodEnd, ourClaimCostTotal, csExportTotal, diff, diffPct };
 }
+
+// ============================================================================
+// 시즌 알림(YoY/MoM) — MD팀 요청. "작년 이맘때도 이슈였던 상품"(YoY)과 "지난달에 새로 심각해진
+// 상품"(MoM)을 지난달(완료된 달) 기준으로 잡아 주간 핵심 지표 탭 배너에 띄운다.
+//
+// 원본 행을 계속 들고 있을 필요가 없어서(작년 전체를 통째로 저장하면 용량이 커짐), 상품×월
+// 집계(건수 두 개)만 남기고 원본은 버린다 — 2025년 참고 데이터도 이 집계 형태로만 저장한다.
+// ============================================================================
+
+export interface ProductMonthAggregate {
+  product: string; // 기준상품명(첫 "/" 앞부분)
+  month: string; // "YYYY-MM"
+  accidentCount: number;
+  orderCount: number; // 재발송 제외
+}
+
+// orderItems/problemForms 원본에서 상품×월 집계를 뽑는다 — 2026년 실시간 데이터(지난달/그전달
+// 계산용)와 2025년 참고 데이터 업로드(YoY용) 둘 다 이 함수 하나로 계산한다.
+export function computeProductMonthAggregates(
+  orderItems: OrderItem[],
+  problemForms: ProblemForm[]
+): ProductMonthAggregate[] {
+  const orderMap = new Map<string, number>();
+  orderItems.forEach(o => {
+    if (o.isReshipCost || !o.paymentDate) return;
+    const month = monthKeyOf(o.paymentDate);
+    if (!month) return;
+    const product = (o.product || "").split("/")[0].trim();
+    if (!product) return;
+    const key = `${product}|${month}`;
+    orderMap.set(key, (orderMap.get(key) || 0) + 1);
+  });
+
+  const accidentMap = new Map<string, number>();
+  problemForms.forEach(p => {
+    if (!p.receivedDate) return;
+    const month = monthKeyOf(p.receivedDate);
+    if (!month) return;
+    const product = (p.productName || "").split("/")[0].trim();
+    if (!product) return;
+    const key = `${product}|${month}`;
+    accidentMap.set(key, (accidentMap.get(key) || 0) + 1);
+  });
+
+  const allKeys = new Set([...orderMap.keys(), ...accidentMap.keys()]);
+  return Array.from(allKeys).map(key => {
+    const [product, month] = key.split("|");
+    return {
+      product,
+      month,
+      accidentCount: accidentMap.get(key) || 0,
+      orderCount: orderMap.get(key) || 0,
+    };
+  });
+}
+
+// 오늘 날짜 기준 "지난달(완료된 달)/그전달/작년 같은 달"을 동적으로 계산한다 — 하드코딩 안 함,
+// 달이 바뀌면 자동으로 따라간다. 이번달은 성숙 윈도우가 안 지나 잠정치라 비교 대상에서 뺀다.
+export function computeSeasonalCompareMonths(today: Date = new Date()): { currentMonth: string; priorMonth: string; yoyMonth: string } {
+  const y = today.getFullYear(), m = today.getMonth();
+  const fmt = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  const lastCompleted = new Date(y, m - 1, 1);
+  const priorToThat = new Date(y, m - 2, 1);
+  const yoy = new Date(lastCompleted.getFullYear() - 1, lastCompleted.getMonth(), 1);
+  return { currentMonth: fmt(lastCompleted), priorMonth: fmt(priorToThat), yoyMonth: fmt(yoy) };
+}
+
+// 실측(2026년 8월 데이터)으로 확인해 정한 임계값 — 클레임율만 보면 표본이 작은 상품(예: 3건 중
+// 1건=33%)이 노이즈로 낄 수 있어, 최소 주문건수·최소 사고접수건수를 같이 요구한다. 사용자 확인 후
+// 사고접수건수 최소치는 3에서 4로 상향(여유 마진).
+export const SEASONAL_ALERT_THRESHOLD = {
+  minClaimRate: 5, // %
+  minOrderCount: 20,
+  minAccidentCount: 4,
+};
+
+function qualifiesForSeasonalAlert(agg: ProductMonthAggregate | undefined): boolean {
+  if (!agg) return false;
+  if (agg.orderCount < SEASONAL_ALERT_THRESHOLD.minOrderCount) return false;
+  if (agg.accidentCount < SEASONAL_ALERT_THRESHOLD.minAccidentCount) return false;
+  return (agg.accidentCount / agg.orderCount) * 100 >= SEASONAL_ALERT_THRESHOLD.minClaimRate;
+}
+
+export interface SeasonalAlert {
+  product: string;
+  type: "yoy" | "mom"; // yoy = 작년 같은 달에도 이슈였음, mom = 그전달엔 안 그랬다가 지난달에 새로 심각해짐
+  currentMonth: string;
+  currentAccidentCount: number;
+  currentOrderCount: number;
+  currentClaimRate: number;
+  compareMonth: string;
+  compareAccidentCount: number;
+  compareOrderCount: number;
+  compareClaimRate: number;
+}
+
+// 좁은 기간(예: 최근 1~2주치)만 담긴 CS export를 업로드했을 때, 비교월의 주문량이 실제로는
+// 그 달 전체가 아니라 일부만 반영된 것일 수 있다 — 이 경우 "그 달엔 주문이 0건이라 이번달에
+// 갑자기 심각해졌다"는 MoM 알림이 대량으로 오탐 발생한다(비교월 데이터가 얇아서 생기는 착시,
+// 실제로 새로 나빠진 게 아님). 비교월 전체 주문량이 이번달 전체 주문량의 30% 미만이면
+// "데이터가 불충분하다"고 보고 해당 비교(YoY 또는 MoM) 전체를 건너뛴다.
+const MIN_COMPARE_MONTH_COVERAGE_RATIO = 0.3;
+
+function isCompareMonthDataSufficient(currentTotalOrders: number, compareTotalOrders: number): boolean {
+  if (currentTotalOrders <= 0) return compareTotalOrders > 0;
+  return compareTotalOrders >= currentTotalOrders * MIN_COMPARE_MONTH_COVERAGE_RATIO;
+}
+
+export interface SeasonalAlertResult {
+  alerts: SeasonalAlert[];
+  momDataSufficient: boolean;
+  yoyDataSufficient: boolean;
+}
+
+export function computeSeasonalAlerts(
+  currentAggregates: ProductMonthAggregate[],
+  currentMonth: string,
+  priorAggregates: ProductMonthAggregate[],
+  priorMonth: string,
+  yoyAggregates: ProductMonthAggregate[],
+  yoyMonth: string
+): SeasonalAlertResult {
+  const currentRows = currentAggregates.filter(a => a.month === currentMonth);
+  const priorRows = priorAggregates.filter(a => a.month === priorMonth);
+  const yoyRows = yoyAggregates.filter(a => a.month === yoyMonth);
+
+  const currentTotalOrders = currentRows.reduce((sum, a) => sum + a.orderCount, 0);
+  const priorTotalOrders = priorRows.reduce((sum, a) => sum + a.orderCount, 0);
+  const yoyTotalOrders = yoyRows.reduce((sum, a) => sum + a.orderCount, 0);
+
+  const momDataSufficient = isCompareMonthDataSufficient(currentTotalOrders, priorTotalOrders);
+  const yoyDataSufficient = isCompareMonthDataSufficient(currentTotalOrders, yoyTotalOrders);
+
+  const priorByProduct = new Map(priorRows.map(a => [a.product, a]));
+  const yoyByProduct = new Map(yoyRows.map(a => [a.product, a]));
+
+  const alerts: SeasonalAlert[] = [];
+  currentRows.forEach(cur => {
+    if (!qualifiesForSeasonalAlert(cur)) return;
+    const currentClaimRate = Math.round((cur.accidentCount / cur.orderCount) * 1000) / 10;
+
+    if (yoyDataSufficient) {
+      const yoy = yoyByProduct.get(cur.product);
+      if (qualifiesForSeasonalAlert(yoy)) {
+        alerts.push({
+          product: cur.product, type: "yoy",
+          currentMonth, currentAccidentCount: cur.accidentCount, currentOrderCount: cur.orderCount, currentClaimRate,
+          compareMonth: yoyMonth, compareAccidentCount: yoy!.accidentCount, compareOrderCount: yoy!.orderCount,
+          compareClaimRate: Math.round((yoy!.accidentCount / yoy!.orderCount) * 1000) / 10,
+        });
+      }
+    }
+
+    if (momDataSufficient) {
+      const prior = priorByProduct.get(cur.product);
+      if (!qualifiesForSeasonalAlert(prior)) {
+        alerts.push({
+          product: cur.product, type: "mom",
+          currentMonth, currentAccidentCount: cur.accidentCount, currentOrderCount: cur.orderCount, currentClaimRate,
+          compareMonth: priorMonth, compareAccidentCount: prior?.accidentCount || 0, compareOrderCount: prior?.orderCount || 0,
+          compareClaimRate: prior && prior.orderCount > 0 ? Math.round((prior.accidentCount / prior.orderCount) * 1000) / 10 : 0,
+        });
+      }
+    }
+  });
+
+  return { alerts, momDataSufficient, yoyDataSufficient };
+}

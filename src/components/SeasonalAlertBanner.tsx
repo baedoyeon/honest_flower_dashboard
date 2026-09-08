@@ -1,0 +1,183 @@
+import { useMemo, useRef, useState } from "react";
+import { Bell, Upload, CheckCircle2 } from "lucide-react";
+import { useReviews } from "../context/ReviewsContext";
+import { parseCSVToOrderItems, parseCSVToProblemForms } from "../utils/csvParser";
+import {
+  computeProductMonthAggregates, computeSeasonalCompareMonths, computeSeasonalAlerts
+} from "../utils/claimCostEngine";
+import { OrderItem } from "../data/orderItems";
+import { ProblemForm } from "../data/problemForms";
+
+// MD팀 요청 — "작년 이맘때도 이슈였던 상품"(YoY)과 "지난달에 새로 심각해진 상품"(MoM)을 매번
+// 방문해야 보이는 탭 안이 아니라, 첫 화면(주간 핵심 지표)에 항상 뜨는 배너로 보여준다.
+// 임계값(클레임율 5%↑ · 주문 20건↑ · 사고접수 4건↑)은 2026년 8월 실측으로 정함 — claimCostEngine.ts
+// SEASONAL_ALERT_THRESHOLD 참고.
+export default function SeasonalAlertBanner() {
+  const { orderItems, problemForms, yoyReferenceAggregates, importYoyReferenceData, setActiveTab } = useReviews();
+  const [showUpload, setShowUpload] = useState(false);
+  const [parsedOi, setParsedOi] = useState<OrderItem[] | null>(null);
+  const [parsedPf, setParsedPf] = useState<ProblemForm[] | null>(null);
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
+  const oiInputRef = useRef<HTMLInputElement>(null);
+  const pfInputRef = useRef<HTMLInputElement>(null);
+
+  const { currentMonth, priorMonth, yoyMonth } = useMemo(() => computeSeasonalCompareMonths(), []);
+
+  const { alerts, momDataSufficient, yoyDataSufficient } = useMemo(() => {
+    const currentAndPrior = computeProductMonthAggregates(orderItems, problemForms);
+    return computeSeasonalAlerts(currentAndPrior, currentMonth, currentAndPrior, priorMonth, yoyReferenceAggregates, yoyMonth);
+  }, [orderItems, problemForms, yoyReferenceAggregates, currentMonth, priorMonth, yoyMonth]);
+
+  const yoyAlerts = alerts.filter(a => a.type === "yoy");
+  const momAlerts = alerts.filter(a => a.type === "mom");
+
+  const hasYoyReferenceForThisMonth = yoyReferenceAggregates.some(a => a.month === yoyMonth);
+  const yoyNote = !hasYoyReferenceForThisMonth
+    ? `${yoyMonth} 참고 데이터 없음 — YoY 비교 불가`
+    : !yoyDataSufficient
+      ? `${yoyMonth} 참고 데이터가 이번달 대비 너무 적어(부분 export로 추정) YoY 비교를 건너뜀`
+      : null;
+  const momNote = !momDataSufficient
+    ? `${priorMonth} 데이터가 이번달 대비 너무 적어(부분 export로 추정) MoM 비교를 건너뜀`
+    : null;
+
+  const handleOiFile = (file: File) => {
+    const reader = new FileReader();
+    reader.onload = e => {
+      const text = e.target?.result as string;
+      setParsedOi(parseCSVToOrderItems(text).orderItems);
+    };
+    reader.readAsText(file, "utf-8");
+  };
+  const handlePfFile = (file: File) => {
+    const reader = new FileReader();
+    reader.onload = e => {
+      const text = e.target?.result as string;
+      setParsedPf(parseCSVToProblemForms(text).problemForms);
+    };
+    reader.readAsText(file, "utf-8");
+  };
+
+  const handleApply = () => {
+    if (!parsedOi && !parsedPf) return;
+    importYoyReferenceData(parsedOi || [], parsedPf || []);
+    setSuccessMsg(`작년 참고 데이터 반영 완료 (주문 ${parsedOi?.length ?? 0}건 · 사고접수 ${parsedPf?.length ?? 0}건 — 상품×월 집계만 저장, 원본 행은 저장 안 함)`);
+    setTimeout(() => {
+      setParsedOi(null); setParsedPf(null);
+      setSuccessMsg(null); setShowUpload(false);
+    }, 3000);
+  };
+
+  if (alerts.length === 0 && !showUpload) {
+    return (
+      <div className="rounded-3xl border border-slate-200 bg-white p-4 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2 text-slate-400">
+          <Bell className="h-4 w-4" />
+          <p className="text-xs font-bold">
+            시즌 알림 — {currentMonth} 기준 반복/신규 악화 상품 없음
+            {yoyNote && <span className="text-amber-600 ml-1">({yoyNote})</span>}
+            {momNote && <span className="text-amber-600 ml-1">({momNote})</span>}
+          </p>
+        </div>
+        <button onClick={() => setShowUpload(true)} className="text-[11px] font-bold text-slate-400 hover:text-slate-600 transition cursor-pointer">
+          작년 참고 데이터 올리기
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-3xl border border-rose-200 bg-rose-50/40 p-5 space-y-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-start gap-2">
+          <Bell className="h-4 w-4 text-rose-600 mt-0.5" />
+          <div>
+            <h3 className="text-sm font-bold text-slate-900">시즌 알림 ({currentMonth})</h3>
+            <p className="text-[11px] text-slate-500 mt-0.5">
+              클레임율 {'>'}= 5% · 주문 {'>'}= 20건 · 사고접수 {'>'}= 4건 조건을 만족하는 상품만 표시.
+              {yoyNote && <span className="text-amber-600"> {yoyNote}.</span>}
+              {momNote && <span className="text-amber-600"> {momNote}.</span>}
+            </p>
+          </div>
+        </div>
+        <button onClick={() => setShowUpload(v => !v)} className="text-[11px] font-bold text-slate-400 hover:text-slate-600 transition cursor-pointer shrink-0">
+          작년 데이터 {showUpload ? "닫기" : "올리기"}
+        </button>
+      </div>
+
+      {yoyAlerts.length > 0 && (
+        <div className="rounded-2xl border border-rose-200 bg-white p-3 space-y-2">
+          <p className="text-xs font-bold text-rose-800">🔁 작년 {yoyMonth}에도 이슈였던 상품 ({yoyAlerts.length})</p>
+          {yoyAlerts.map(a => (
+            <button
+              key={a.product}
+              onClick={() => setActiveTab("claimcost")}
+              className="w-full text-left flex items-center justify-between gap-2 rounded-xl bg-rose-50/60 px-3 py-2 hover:bg-rose-100 transition cursor-pointer"
+            >
+              <span className="text-xs font-bold text-slate-800">{a.product}</span>
+              <span className="text-[10px] text-slate-500">
+                {a.currentMonth} {a.currentClaimRate}%({a.currentAccidentCount}/{a.currentOrderCount}건) · {a.compareMonth} {a.compareClaimRate}%({a.compareAccidentCount}/{a.compareOrderCount}건)
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {momAlerts.length > 0 && (
+        <div className="rounded-2xl border border-amber-200 bg-white p-3 space-y-2">
+          <p className="text-xs font-bold text-amber-800">🆕 {priorMonth} 대비 새로 심각해진 상품 ({momAlerts.length})</p>
+          {momAlerts.map(a => (
+            <button
+              key={a.product}
+              onClick={() => setActiveTab("claimcost")}
+              className="w-full text-left flex items-center justify-between gap-2 rounded-xl bg-amber-50/60 px-3 py-2 hover:bg-amber-100 transition cursor-pointer"
+            >
+              <span className="text-xs font-bold text-slate-800">{a.product}</span>
+              <span className="text-[10px] text-slate-500">
+                {a.currentMonth} {a.currentClaimRate}%({a.currentAccidentCount}/{a.currentOrderCount}건) · {a.compareMonth} {a.compareClaimRate}%({a.compareAccidentCount}/{a.compareOrderCount}건)
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {showUpload && (
+        <div className="rounded-2xl border border-slate-200 bg-white p-4 space-y-3">
+          <p className="text-[11px] text-slate-500">
+            YoY 비교용 <b>작년 같은 달({yoyMonth})</b> OrderItem/ProblemForm CSV를 그대로 올리세요 — 기존
+            업로드와 같은 파일 형식입니다. 상품×월 집계만 뽑아서 저장하고 원본 행은 버립니다.
+          </p>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <p className="text-[10px] font-bold text-slate-400 mb-1">주문(OrderItem) — {parsedOi ? `${parsedOi.length}건 파싱됨` : "미선택"}</p>
+              <input ref={oiInputRef} type="file" accept=".csv" className="hidden" onChange={e => e.target.files?.[0] && handleOiFile(e.target.files[0])} />
+              <button onClick={() => oiInputRef.current?.click()} className="w-full rounded-xl border border-dashed border-slate-300 py-2 text-[11px] font-bold text-slate-500 hover:border-rose-300 hover:text-rose-600 transition cursor-pointer flex items-center justify-center gap-1">
+                <Upload className="h-3 w-3" /> CSV 선택
+              </button>
+            </div>
+            <div>
+              <p className="text-[10px] font-bold text-slate-400 mb-1">사고접수(ProblemForm) — {parsedPf ? `${parsedPf.length}건 파싱됨` : "미선택"}</p>
+              <input ref={pfInputRef} type="file" accept=".csv" className="hidden" onChange={e => e.target.files?.[0] && handlePfFile(e.target.files[0])} />
+              <button onClick={() => pfInputRef.current?.click()} className="w-full rounded-xl border border-dashed border-slate-300 py-2 text-[11px] font-bold text-slate-500 hover:border-rose-300 hover:text-rose-600 transition cursor-pointer flex items-center justify-center gap-1">
+                <Upload className="h-3 w-3" /> CSV 선택
+              </button>
+            </div>
+          </div>
+          {successMsg ? (
+            <div className="rounded-xl bg-emerald-600 text-white p-3 flex items-center gap-2 text-[11px] font-bold">
+              <CheckCircle2 className="h-4 w-4 shrink-0" /> {successMsg}
+            </div>
+          ) : (
+            <button
+              onClick={handleApply}
+              disabled={!parsedOi && !parsedPf}
+              className="w-full rounded-xl bg-rose-600 hover:bg-rose-700 disabled:opacity-40 text-white py-2 text-[11px] font-bold transition cursor-pointer"
+            >
+              반영하기
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
