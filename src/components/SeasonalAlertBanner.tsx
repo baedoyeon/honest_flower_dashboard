@@ -15,6 +15,8 @@ import { ProblemForm } from "../data/problemForms";
 export default function SeasonalAlertBanner() {
   const { orderItems, problemForms, yoyReferenceAggregates, importYoyReferenceData, setActiveTab } = useReviews();
   const [showUpload, setShowUpload] = useState(false);
+  const [showAllYoy, setShowAllYoy] = useState(false);
+  const [showAllMom, setShowAllMom] = useState(false);
   const [parsedOi, setParsedOi] = useState<OrderItem[] | null>(null);
   const [parsedPf, setParsedPf] = useState<ProblemForm[] | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
@@ -115,9 +117,17 @@ export default function SeasonalAlertBanner() {
       {yoyAlerts.length > 0 ? (
         <div className="rounded-2xl border border-rose-200 bg-white p-3 space-y-2">
           <p className="text-xs font-bold text-rose-800">🔁 작년 {yoyMonth}에도 이슈였던 상품 ({yoyAlerts.length})</p>
-          {yoyAlerts.map(a => (
+          {(showAllYoy ? yoyAlerts : yoyAlerts.slice(0, 3)).map(a => (
             <SeasonalAlertRow key={a.product} alert={a} compareLabel="작년 동월" onClick={() => setActiveTab("claimcost")} />
           ))}
+          {yoyAlerts.length > 3 && (
+            <button
+              onClick={() => setShowAllYoy(v => !v)}
+              className="w-full text-center text-[11px] font-bold text-rose-600 hover:text-rose-800 py-1.5 transition cursor-pointer"
+            >
+              {showAllYoy ? "접기" : `더보기 (${yoyAlerts.length - 3}개 더)`}
+            </button>
+          )}
         </div>
       ) : !yoyNote ? (
         // 비교가 안 돌아서(데이터 없음/부족) 조용한 것과, 비교는 정상적으로 돌았는데 겹치는 상품이
@@ -129,9 +139,17 @@ export default function SeasonalAlertBanner() {
       {momAlerts.length > 0 && (
         <div className="rounded-2xl border border-amber-200 bg-white p-3 space-y-2">
           <p className="text-xs font-bold text-amber-800">🆕 {priorMonth} 대비 새로 심각해진 상품 ({momAlerts.length})</p>
-          {momAlerts.map(a => (
+          {(showAllMom ? momAlerts : momAlerts.slice(0, 3)).map(a => (
             <SeasonalAlertRow key={a.product} alert={a} compareLabel="전월" onClick={() => setActiveTab("claimcost")} />
           ))}
+          {momAlerts.length > 3 && (
+            <button
+              onClick={() => setShowAllMom(v => !v)}
+              className="w-full text-center text-[11px] font-bold text-amber-700 hover:text-amber-900 py-1.5 transition cursor-pointer"
+            >
+              {showAllMom ? "접기" : `더보기 (${momAlerts.length - 3}개 더)`}
+            </button>
+          )}
         </div>
       )}
 
