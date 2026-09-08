@@ -273,10 +273,14 @@ export function computeSalesSkuStats(orderItems: OrderItem[], problemForms: Prob
   const orderNumberMap = new Map<string, OrderItem>();
   originals.forEach(o => { if (o.orderNumber) orderNumberMap.set(o.orderNumber, o); });
 
+  // 주문번호는 코호트(이 달에 결제된 주문인가) 확인용으로만 쓰고, 실제 상품 귀속은 ProblemForm
+  // 자체의 productName을 우선한다 — 한 주문에 여러 상품이 담기면 주문번호가 전부 같아서
+  // order.product만 쓰면 실제 사고가 난 상품과 다른 상품이 뽑힐 수 있다(실측으로 확인됨).
   const claimSkus = new Set<string>();
   problemForms.forEach(p => {
     const order = orderNumberMap.get(p.orderItemRef);
-    if (order) claimSkus.add(order.product);
+    if (!order) return;
+    claimSkus.add(p.productName || order.product);
   });
 
   const salesSkuCount = salesSkus.size;

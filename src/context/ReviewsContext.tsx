@@ -944,10 +944,12 @@ export function ReviewsProvider({ children }: { children: React.ReactNode }) {
     try {
       let combined: OrderItem[];
       if (!replace) {
+        // id로 병합한다 — 주문번호는 한 주문에 여러 상품이 담기면 그 줄들이 전부 같은 값을 공유해서
+        // (그룹주문번호처럼 동작) 키로 쓰면 같은 주문번호를 가진 다른 상품 줄들이 서로를 덮어씀.
         const mergedMap = new Map<string, OrderItem>();
-        orderItems.forEach(i => mergedMap.set(i.orderNumber || i.id, { ...i }));
+        orderItems.forEach(i => mergedMap.set(i.id, { ...i }));
         newItems.forEach(incoming => {
-          const key = incoming.orderNumber || incoming.id;
+          const key = incoming.id;
           const existing = mergedMap.get(key);
           if (existing) {
             if (incoming.refundAmount !== undefined) existing.refundAmount = incoming.refundAmount;

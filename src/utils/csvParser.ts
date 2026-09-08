@@ -1054,10 +1054,12 @@ export function parseCSVToOrderItems(csvText: string): OrderItemParseResult {
     });
   });
 
-  // Deduplicate by exact orderNumber match (natural unique key, unlike Incident's fuzzy matching)
+  // Deduplicate by exact id match. 주문번호는 한 주문(체크아웃)에 여러 상품이 담기면 그 상품 줄들이
+  // 전부 같은 값을 공유한다(그룹주문번호처럼 동작) — 실측으로 확인됨(같은 주문번호, 다른 id·다른
+  // 상품 3줄). id만 CSV 원본에서 행 단위로 100% 유일하다.
   const orderItemsMap = new Map<string, OrderItem>();
   rawOrderItems.forEach(item => {
-    const key = item.orderNumber || item.id;
+    const key = item.id;
     const existing = orderItemsMap.get(key);
     if (existing) {
       if (item.refundAmount !== undefined && existing.refundAmount === undefined) existing.refundAmount = item.refundAmount;

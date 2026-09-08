@@ -106,6 +106,32 @@ OrderItem 조인 없이 상품별 사고접수 집계 가능해짐.
 **교훈**: 월/주 단위로 집계하는 기능은 전부 "비교 대상 기간의 데이터가 실제로 그 기간 전체를 커버하는가"를
 따로 검증해야 함 — 건수가 있다고 해서 그 기간 전체가 온전히 반영됐다는 보장이 안 됨.
 
+### 14. OrderItem CSV import — 한 주문에 상품이 여러 개면 나머지가 통째로 사라짐 (2026-09-08, FIXED)
+**증상**: 시즌 알림 검증 중 아세비 2026-08 주문 건수가 앱에는 110건인데 원본 CSV를 직접 세어보니 170건.
+**원인**: 8월 28일 대규모 리팩터링(`fd82a69`) 때 `parseCSVToOrderItems`의 행 dedup 키를
+`item.orderNumber || item.id`로 짰음 — "주문번호는 상품 한 줄당 하나씩 나오는 자연스러운 고유 키"라고
+검증 없이 가정했는데, 실제로는 한 고객이 한 번에 여러 상품을 주문하면 그 상품 줄들이 전부 같은
+주문번호를 공유함(그룹주문번호처럼 동작). 실측: `orderitem_6359.csv` 한 파일에서만 8,670행 중
+`id`는 8,670개 다 유일한데 `주문번호`는 5,530개뿐 — 3,140행(36%)이 dedup 과정에서 조용히 사라짐.
+예시(주문번호 `26083017880533424-1`): id 1321108/맨드라미 샤론핑크, id 1321109/블러싱 브라이드,
+id 1321110/보리사초 — 세 상품이 한 주문번호를 공유, 두 개가 통째로 증발.
+`ReviewsContext.tsx`의 append 병합 로직도 같은 키(`orderNumber || id`)를 써서 동일하게 영향받음.
+**수정**: `parseCSVToOrderItems`(csvParser.ts:1057-1067)와 `importOrderItems`의 append 병합
+(ReviewsContext.tsx:942-963) 둘 다 dedup 키를 `id`로 변경. 부수적으로 `computeSalesSkuStats`
+(claimCostEngine.ts)가 ProblemForm→OrderItem 매칭 시 `orderNumber`로 찾은 order의 `product`를
+그대로 썼던 것도 같은 계열 문제라 — 사고가 난 상품이 그 주문의 다른 상품으로 잘못 귀속될 수 있어
+`p.productName`(ProblemForm 자체 필드)을 우선하도록 같이 고침.
+**검증**: 실측 CSV로 재확인 — 파싱 후 총 건수 8,670건(원본과 정확히 일치), 아세비 2026-08 170건
+(수기 계산과 일치).
+**교훈**: "주문번호"와 "그룹주문번호"처럼 이름이 비슷한 두 키가 있으면 어느 게 진짜 행 단위 고유
+키인지 절대 이름만 보고 가정하지 말고 실데이터로 `set(col).size === len(rows)` 확인부터 해야 함.
+이번에도 "숫자 합계가 맞나"만 보다가 놓쳤고, "원본 행 수 vs 파싱 후 행 수"를 직접 대조하고 나서야
+드러남 — 총계 비교와 행 수 비교는 서로 다른 종류의 버그를 잡는다.
+**아직 안 건드린 부분**: `computeMethodBreakdownByWeek`(paymentDate만 써서 영향 없음)와
+`verifyAccidentScopeReflectsRefund`(진단용, price/refundAmount 비교라 collision 시 잘못된 상품과
+비교할 수 있음 — 사용자 노출 지표 아니라 낮은 우선순위로 보류)는 같은 `orderNumberMap` 패턴을 쓰지만
+이번엔 안 고침.
+
 ---
 
 ## 🟠 보안/인프라
