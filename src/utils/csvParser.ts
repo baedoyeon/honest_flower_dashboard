@@ -15,7 +15,10 @@ function maskCustomerName(id: number, rawName?: string): string {
     if (trimmed.includes("*")) return trimmed;
     if (trimmed.length <= 1) return trimmed;
     if (trimmed.length === 2) return trimmed[0] + "*";
-    return trimmed[0] + "*" + trimmed.slice(2);
+    // 3글자를 넘는 이름(영문 닉네임, "성 이름" 조합 등)에서 trimmed.slice(2)를 쓰면 두 번째
+    // 글자만 가리고 나머지 전체가 그대로 노출됨(실측: "Youngmee Lee" -> "Y*ungmee Lee") — 길이와
+    // 무관하게 마지막 한 글자만 보이도록 고정해서, 원본 이름을 절대 유추 불가능하게 만든다.
+    return trimmed[0] + "*" + trimmed.slice(-1);
   }
   const MASKED = ["김*진", "이*영", "박*수", "최*희", "정*원", "강*민", "조*현", "윤*서", "장*우", "임*하", "한*준", "오*은"];
   return MASKED[Math.abs(id) % MASKED.length];
@@ -782,7 +785,10 @@ export function parseCSVToIncidents(csvText: string, importChannel: "일반" | "
     }
 
     let rawReviewer = colReviewer !== -1 && row[colReviewer] ? row[colReviewer].trim() : "";
-    let customerName = rawReviewer || maskCustomerName(rowNum, rawReviewer);
+    // rawReviewer가 있으면 그걸 그대로 쓰고 없을 때만 마스킹하던 이전 로직은 원본 이름을 그대로
+    // 노출시키는 버그였음(maskCustomerName은 rawName이 있으면 마스킹, 없으면 대체 이름을 만들어주므로
+    // 항상 이 함수를 거쳐야 함).
+    let customerName = maskCustomerName(rowNum, rawReviewer);
 
     // Resolve Incident Status
     let incidentStatus: "처리완료" | "반려됨" | "접수중" = "처리완료";
@@ -1550,7 +1556,7 @@ export function parseCSVToChatRooms(csvText: string): ChatRoomParseResult {
 // 다른 5개 파서와 달리 이 CSV는 이미 SQL 단(디비버로 직접 실행한 쿼리)에서 주/월별로 집계까지
 // 끝난 형태(receipt_week 또는 receipt_month, total_qty, dispatch_failed_qty, dispatch_failure_rate)라,
 // row-level 원본을 다시 계산할 필요가 없다 — 그대로 파싱해서 차트에 꽂으면 된다. 그래서 별도
-// "엔진" 파일 없이 여기 파서 하나로 충분하다. 컬럼명은 사용자가 직접 짠 고정 쿼리의 별칭이라
+// 엔진 파일 없이 여기 파서 하나로 충분하다. 컬럼명은 사용자가 직접 짠 고정 쿼리의 별칭이라
 // 어드민 export처럼 이름이 들쭉날쭉할 위험이 없으므로, 다른 파서들의 유사매칭 대신 정확매칭을 쓴다.
 // ============================================================================
 
