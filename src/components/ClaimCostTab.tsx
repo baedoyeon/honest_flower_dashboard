@@ -844,7 +844,8 @@ function ProductClaimTable({ stats, monthLabel, month }: { stats: ProductClaimSt
 
       {searchedProductDetail && (
         <div className="mb-4 rounded-xl border border-purple-200 bg-purple-50/50 p-3">
-          <p className="text-[11px] font-bold text-purple-800 mb-2">"{searchedProductDetail.baseName}" 기간별 클레임율</p>
+          <p className="text-[11px] font-bold text-purple-800 mb-0.5">"{searchedProductDetail.baseName}" 기간별 클레임율</p>
+          <p className="text-[10px] text-purple-400 mb-2">결제월 기준 — 접수일 기준인 "사고접수" 탭과 건수가 다를 수 있어요</p>
           <div className="grid grid-cols-3 gap-2">
             {[searchedProductDetail.prior, searchedProductDetail.yoy, searchedProductDetail.current].map((period, i) => (
               <div key={i} className={`rounded-lg bg-white px-2.5 py-1.5 border ${period === searchedProductDetail.current ? "border-purple-300" : "border-slate-100"}`}>
