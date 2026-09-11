@@ -809,10 +809,10 @@ function ProductClaimTable({ stats, monthLabel, month }: { stats: ProductClaimSt
     <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
       <WidgetHeader
         title={`${monthLabel} 상품별 클레임 전체 현황`}
-        subtitle={`클레임건수 순, 전체 ${stats.length}개 상품 (총 ${totalClaimCount}건 · 총 클레임비용 ${won(totalClaimCost)})`}
+        subtitle={`클레임건수 순, 클레임 발생 ${stats.length}개 상품 (총 ${totalClaimCount}건 · 총 클레임비용 ${won(totalClaimCost)})`}
         icon={<ListChecks className="h-4 w-4 text-purple-600 mt-0.5" />}
         meta={{
-          기능: "이번달(결제일 기준) 전체 상품의 클레임 현황을 Top3 제한 없이 모두 보여주는 표. Top3 위젯과 동일한 계산 로직을 월 필터만 다르게 재사용",
+          기능: "이번달(결제일 기준) 주문 중 클레임이 발생한 상품만 Top3 제한 없이 모두 보여주는 표. Top3 위젯과 동일한 계산 로직을 월 필터만 다르게 재사용",
           소스: "orderItem CSV + problemForm CSV (\"주문 아이템\" FK 조인)",
           수집방법: "computeProductClaimStats(orderItems, problemForms, 이번달)로 상품별 group by, 클레임건수 내림차순 전체 반환",
           계산식: "클레임율(%) = 상품별 클레임건수/상품별 주문건수×100 — Top3 위젯과 동일 공식. 총 클레임비용 = 환불액 합계 + 재발송비용 합계(순수 재발송·교환은 환불액이 0이라도 재발송비용이 발생함)",
@@ -919,7 +919,7 @@ function ProductClaimTable({ stats, monthLabel, month }: { stats: ProductClaimSt
             </tbody>
             <tfoot className="sticky bottom-0 z-10">
               <tr className="bg-purple-50 border-t-2 border-purple-200 font-bold text-slate-800">
-                <td className="py-2 px-3" colSpan={2}>합계 (전체 {stats.length}개 상품)</td>
+                <td className="py-2 px-3" colSpan={2}>합계 (클레임 발생 {stats.length}개 상품)</td>
                 <td className="py-2 px-3 text-purple-700">{totalClaimCount}건</td>
                 <td className="py-2 px-3">-</td>
                 <td className="py-2 px-3 font-mono">{won(totalRefundAmount)}</td>
