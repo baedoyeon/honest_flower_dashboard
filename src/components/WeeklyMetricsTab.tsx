@@ -6,6 +6,7 @@ import { computeNpsRates } from "../utils/csvParser";
 import NpsWatchlistWidget from "./NpsWatchlistWidget";
 import NpsTrendWidget from "./NpsTrendWidget";
 import SeasonalAlertBanner from "./SeasonalAlertBanner";
+import WeeklyAccidentSpikeBanner from "./WeeklyAccidentSpikeBanner";
 import { useState, useMemo } from "react";
 
 export default function WeeklyMetricsTab() {
@@ -332,6 +333,7 @@ export default function WeeklyMetricsTab() {
       transition={{ duration: 0.4 }}
       className="space-y-6"
     >
+      <WeeklyAccidentSpikeBanner />
       <SeasonalAlertBanner />
 
       {/* Active Product Filter Alert Banner */}

@@ -948,3 +948,44 @@ export function computeSeasonalAlerts(
 
   return { alerts, momDataSufficient, yoyDataSufficient };
 }
+
+export interface WeeklyAccidentSpike {
+  product: string;
+  count: number;
+  windowStart: string; // "YYYY.MM.DD"
+  windowEnd: string; // "YYYY.MM.DD"
+}
+
+// 시즌 알림(YoY/MoM, 월 단위)과는 별개로 "최근 N일 사이 갑자기 사고접수가 몰리는 상품"을
+// 잡아내는 짧은 주기 알림 — 주문량 대비 비율이 아니라 절대 건수 임계값 기준(작은 표본에서도
+// 급증 신호를 놓치지 않기 위함).
+export function computeWeeklyAccidentSpikes(
+  problemForms: ProblemForm[],
+  today: Date = new Date(),
+  windowDays: number = 7,
+  minCount: number = 3
+): WeeklyAccidentSpike[] {
+  const windowStart = new Date(today);
+  windowStart.setDate(windowStart.getDate() - (windowDays - 1));
+  windowStart.setHours(0, 0, 0, 0);
+  const windowEndOfDay = new Date(today);
+  windowEndOfDay.setHours(23, 59, 59, 999);
+
+  const counts = new Map<string, number>();
+  problemForms.forEach(p => {
+    if (!p.receivedDate) return;
+    const d = parseDateStr(p.receivedDate);
+    if (!d || d < windowStart || d > windowEndOfDay) return;
+    const product = (p.productName || "").split("/")[0].trim();
+    if (!product) return;
+    counts.set(product, (counts.get(product) || 0) + 1);
+  });
+
+  const windowStartStr = formatYmd(windowStart);
+  const windowEndStr = formatYmd(today);
+
+  return Array.from(counts.entries())
+    .filter(([, count]) => count >= minCount)
+    .map(([product, count]) => ({ product, count, windowStart: windowStartStr, windowEnd: windowEndStr }))
+    .sort((a, b) => b.count - a.count);
+}
