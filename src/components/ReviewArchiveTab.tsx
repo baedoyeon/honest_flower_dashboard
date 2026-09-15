@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from "react";
 import { Review } from "../data/classifiedReviews";
-import { Star, Filter, ArrowUpDown, RefreshCw, MessageSquare, ShieldCheck, HelpCircle, AlertOctagon, Calendar, ChevronDown, ChevronUp, Database, Plus, Check, Loader2, Download, Search, Upload, FileSpreadsheet, FileText, Sparkles, CheckCircle2, AlertCircle, ArrowRight, Eye, Trash2, BarChart2, PieChart, AlertTriangle } from "lucide-react";
+import { Star, Filter, ArrowUpDown, RefreshCw, MessageSquare, ShieldCheck, HelpCircle, AlertOctagon, Calendar, ChevronDown, ChevronUp, Database, Plus, Check, Loader2, Download, Search, Upload, FileSpreadsheet, FileText, Sparkles, CheckCircle2, AlertCircle, ArrowRight, Eye, Trash2, BarChart2, PieChart, AlertTriangle, ExternalLink } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { useReviews, getGroupKeysMap, findIntegrityIssues, getDeduplicatedReviews, areReviewsSamePost } from "../context/ReviewsContext";
 import { rawReviewsCSV } from "../data/rawReviews";
@@ -1855,6 +1855,17 @@ Content-Type: application/json
                               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                                 <div className="flex items-center gap-2">
                                   <span className="text-xs font-bold text-slate-400">리뷰 상세 정보 (ID: #{item.id})</span>
+                                  <div className="h-3 w-px bg-slate-200" />
+                                  <a
+                                    href={`https://server.honestflower.kr/bloom/reviews/review/${item.id}/change/`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    onClick={(e) => e.stopPropagation()}
+                                    className="inline-flex items-center gap-1 text-xs font-bold text-indigo-600 hover:text-indigo-800 hover:underline"
+                                    title="어드민에서 이 리뷰 원본 보기 (새 창)"
+                                  >
+                                    <ExternalLink className="h-3 w-3" /> 어드민에서 보기
+                                  </a>
                                   <div className="h-3 w-px bg-slate-200" />
                                   <span className="text-xs font-bold text-slate-700">
                                     {item.reviewer ? `${item.reviewer}님의 후기` : "익명 고객님의 후기"}
