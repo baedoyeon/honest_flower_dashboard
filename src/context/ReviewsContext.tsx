@@ -4,7 +4,7 @@ import { Incident, initialIncidentsData } from "../data/initialIncidents";
 import { OrderItem, initialOrderItemsData } from "../data/orderItems";
 import { ProblemForm, initialProblemFormsData } from "../data/problemForms";
 import { ChatRoom, initialChatRoomsData } from "../data/chatRooms";
-import { CsCostExportRow, DispatchFailureRow, NpsSummary, NpsDetractorRow, NpsTrendPoint, NpsPurchaseTierStat, NpsImportResult, classifyCategory, getDepartmentForCategory } from "../utils/csvParser";
+import { CsCostExportRow, DispatchFailureRow, NpsSummary, NpsDetractorRow, NpsTrendPoint, NpsPurchaseTierStat, NpsImportResult, classifyCategory, getDepartmentForCategory, maskCustomerName } from "../utils/csvParser";
 import { defaultCompanyHolidays } from "../data/companyHolidays";
 import { idbLoad, idbSave } from "../utils/idbStorage";
 import { DEFAULT_MONTHLY_CS_LABOR_COST_ALLOCATION_KRW } from "../utils/chatRoomEngine";
@@ -217,22 +217,12 @@ function saveToLocalStorage(key: string, value: unknown): void {
   }
 }
 
-const MASKED_NAMES = [
-  "김*정", "이*민", "박*현", "최*원", "정*우", "강*서", "조*아", "윤*준", "장*민", "한*영",
-  "오*지", "서*훈", "신*연", "권*재", "황*우", "송*은", "안*진", "임*혁", "전*하", "홍*윤"
-];
-
-// Helper: Ensure a name is masked to 'X*Y' format or assign a consistent masked name
-export function getMaskedName(id: number, rawName?: string): string {
-  if (rawName && rawName.trim()) {
-    const trimmed = rawName.trim();
-    if (trimmed.includes("*")) return trimmed;
-    if (trimmed.length <= 1) return trimmed;
-    if (trimmed.length === 2) return trimmed[0] + "*";
-    return trimmed[0] + "*" + trimmed.slice(2);
-  }
-  return MASKED_NAMES[id % MASKED_NAMES.length];
-}
+// 옛날엔 이 파일에 maskCustomerName과 거의 동일한(그러나 slice(2) 버그가 안 고쳐진 채 남아있던)
+// 별도 사본(getMaskedName)이 있었음 — csvParser.ts 쪽만 고치고 이쪽은 놓쳐서, "처리 필요" 탭 등
+// 7군데에서 4글자 넘는 고객명이 여전히 거의 그대로 노출되고 있었다(실측으로 재확인). 마스킹 로직을
+// 두 곳에 유지하면 이런 재발이 구조적으로 반복되므로, 앞으로는 csvParser.ts의 maskCustomerName
+// 하나만 쓴다.
+const getMaskedName = maskCustomerName;
 
 // Helper: Determine if two reviews belong to the same post
 export function areReviewsSamePost(a: any, b: any): boolean {

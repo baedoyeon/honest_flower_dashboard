@@ -9,7 +9,7 @@ import {
   isAccidentTypeColumn, isAccidentDetailColumn, isReviewerNameColumn, isIncidentStatusColumn
 } from "./csvColumnMatcher";
 
-function maskCustomerName(id: number, rawName?: string): string {
+export function maskCustomerName(id: number, rawName?: string): string {
   if (rawName && rawName.trim()) {
     const trimmed = rawName.trim();
     if (trimmed.includes("*")) return trimmed;
