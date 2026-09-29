@@ -823,26 +823,17 @@ export function monthsRelativeTo(month: string): { priorMonth: string; yoyMonth:
   return { priorMonth: fmt(prior), yoyMonth: fmt(yoy) };
 }
 
-// 말일 며칠 전부터 "완료된 지난달" 대신 "당월(아직 안 끝난 이번달)"을 선갱신할지 — 사용자 확인:
-// "말일 3일 전 당월 선갱신"(옵션 B). 이 기간에는 이번달이 아직 성숙 윈도우를 다 못 지났으므로
-// isProvisional=true로 표시해 확정치가 아님을 알려야 한다.
-const EARLY_SWITCH_DAYS_BEFORE_MONTH_END = 3;
-
 // 오늘 날짜 기준 "지난달(완료된 달)/그전달/작년 같은 달"을 동적으로 계산한다 — 하드코딩 안 함,
-// 달이 바뀌면 자동으로 따라간다. 평소엔 이번달이 성숙 윈도우가 안 지나 잠정치라 비교 대상에서 빼고
-// 지난달을 기준으로 삼지만, 말일 3일 전부터는 당월을 선갱신해서 보여준다(이 경우 isProvisional=true).
+// 달이 바뀌면 자동으로 따라간다. 이번달은 성숙 윈도우가 안 지나 잠정치라 비교 대상에서 뺀다.
 // (이 "완료된 달" 기준은 시즌 알림 배너 전용 — 특정 상품 검색 패널처럼 이미 화면에 표시 중인
 // 다른 달을 기준으로 봐야 하는 곳은 monthsRelativeTo()를 그 달에 직접 적용할 것.)
-export function computeSeasonalCompareMonths(today: Date = new Date()): { currentMonth: string; priorMonth: string; yoyMonth: string; isProvisional: boolean } {
+export function computeSeasonalCompareMonths(today: Date = new Date()): { currentMonth: string; priorMonth: string; yoyMonth: string } {
   const y = today.getFullYear(), m = today.getMonth();
   const fmt = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-  const lastDayOfThisMonth = new Date(y, m + 1, 0).getDate();
-  const daysUntilMonthEnd = lastDayOfThisMonth - today.getDate();
-  const isProvisional = daysUntilMonthEnd < EARLY_SWITCH_DAYS_BEFORE_MONTH_END;
-  const baseMonth = isProvisional ? new Date(y, m, 1) : new Date(y, m - 1, 1);
-  const currentMonth = fmt(baseMonth);
+  const lastCompleted = new Date(y, m - 1, 1);
+  const currentMonth = fmt(lastCompleted);
   const { priorMonth, yoyMonth } = monthsRelativeTo(currentMonth);
-  return { currentMonth, priorMonth, yoyMonth, isProvisional };
+  return { currentMonth, priorMonth, yoyMonth };
 }
 
 // 작년 참고 데이터는 두 경로로 들어올 수 있다: ① 배너 전용 업로드(yoyReferenceAggregates, 별도 저장)
