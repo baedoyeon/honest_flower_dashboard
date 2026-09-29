@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from "react";
-import { Bell, Upload, CheckCircle2, ArrowRight } from "lucide-react";
+import { Bell, Upload, CheckCircle2, ArrowRight, Hourglass } from "lucide-react";
 import { useReviews } from "../context/ReviewsContext";
 import { parseCSVToOrderItems, parseCSVToProblemForms } from "../utils/csvParser";
 import {
@@ -24,7 +24,7 @@ export default function SeasonalAlertBanner() {
   const oiInputRef = useRef<HTMLInputElement>(null);
   const pfInputRef = useRef<HTMLInputElement>(null);
 
-  const { currentMonth, priorMonth, yoyMonth } = useMemo(() => computeSeasonalCompareMonths(), []);
+  const { currentMonth, priorMonth, yoyMonth, isProvisional } = useMemo(() => computeSeasonalCompareMonths(), []);
 
   // 작년 데이터는 두 경로로 들어올 수 있다: ① 배너 전용 "작년 참고 데이터 올리기"(yoyReferenceAggregates,
   // 원본 행 없이 집계만 저장) ② 평소 쓰는 메인 임포터로 그냥 올려서 orderItems/problemForms 안에 같이
@@ -84,6 +84,7 @@ export default function SeasonalAlertBanner() {
           <Bell className="h-4 w-4" />
           <p className="text-xs font-bold">
             시즌 알림 — {currentMonth} 기준 반복/신규 악화 상품 없음
+            {isProvisional && <ProvisionalBadge />}
             {yoyNote && <span className="text-amber-600 ml-1">({yoyNote})</span>}
             {momNote && <span className="text-amber-600 ml-1">({momNote})</span>}
           </p>
@@ -101,9 +102,13 @@ export default function SeasonalAlertBanner() {
         <div className="flex items-start gap-2">
           <Bell className="h-4 w-4 text-rose-600 mt-0.5" />
           <div>
-            <h3 className="text-sm font-bold text-slate-900">시즌 알림 ({currentMonth})</h3>
+            <h3 className="text-sm font-bold text-slate-900 flex items-center gap-1.5">
+              시즌 알림 ({currentMonth})
+              {isProvisional && <ProvisionalBadge />}
+            </h3>
             <p className="text-[11px] text-slate-500 mt-0.5">
               클레임율 {'>'}= 5% · 주문 {'>'}= 20건 · 사고접수 {'>'}= 4건 조건을 만족하는 상품만 표시.
+              {isProvisional && <span className="text-blue-600"> {currentMonth} 말일 배송분은 아직 성숙 윈도우(수령일+7일)가 다 지나지 않아 접수될 사고가 더 남아있을 수 있습니다(매월 1~7일 한정 안내).</span>}
               {yoyNote && <span className="text-amber-600"> {yoyNote}.</span>}
               {momNote && <span className="text-amber-600"> {momNote}.</span>}
             </p>
@@ -191,6 +196,16 @@ export default function SeasonalAlertBanner() {
         </div>
       )}
     </div>
+  );
+}
+
+// ClaimCostTab의 latest.isProvisional 배지와 같은 톤(파란색+모래시계)으로 통일 — "아직 확정 안 된
+// 수치"라는 의미를 대시보드 전체에서 같은 시각 언어로 전달한다.
+function ProvisionalBadge() {
+  return (
+    <span className="inline-flex items-center gap-0.5 rounded-md bg-blue-100 text-blue-700 text-[10px] font-bold px-1.5 py-0.5">
+      <Hourglass className="h-2.5 w-2.5" /> 잠정치
+    </span>
   );
 }
 
