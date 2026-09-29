@@ -30,6 +30,16 @@ function formatYmdLocal(d: Date): string {
   return `${y}-${m}-${day}`;
 }
 
+// 전역 주차 필터("YYYY.MM.DD" 문자열 범위, ReviewsContext의 weekRanges와 동일 포맷)를 채팅방/전화
+// 행에 적용하기 위한 헬퍼. 이벤트 시각은 다른 함수들과 동일한 관례(채팅="유저챗 처음 오픈된 시간",
+// 그 외="챗봇 생성 시간")를 쓴다. 시각을 못 읽는 행은 어느 주차에도 속하지 않는 것으로 취급해 제외한다.
+export function isChatRoomInRange(room: ChatRoom, range: { start: string; end: string }): boolean {
+  const eventTime = parseDT(room.category === "채팅" ? room.chatOpenedAt : room.chatbotCreatedAt);
+  if (!eventTime) return false;
+  const dateKey = formatYmdLocal(eventTime).replace(/-/g, ".");
+  return dateKey >= range.start && dateKey <= range.end;
+}
+
 // OrderItem.paymentDate("YYYY.MM.DD")와 ProblemForm.receivedDate("YYYY.MM.DD"), ChatRoom 이벤트
 // 시각("YYYY-MM-DD HH:mm") 모두를 "YYYY-MM" 월 키로 통일해 다루기 위한 구분자 무관 헬퍼.
 function monthKeyOfFlexible(s?: string): string {

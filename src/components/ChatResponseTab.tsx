@@ -9,7 +9,7 @@ import { parseCSVToChatRooms, ChatRoomParseResult } from "../utils/csvParser";
 import {
   computeChatRoomSummary, computeHourlyBottleneck, computeChannelTrendByDay, computeFrtArtTrend,
   computeChannelMixAndCPO, computeChannelMixTrendByMonth, reconcileCallbacks, validateOperatingHoursColumn,
-  compute2026ForecastTrendByMonth
+  compute2026ForecastTrendByMonth, isChatRoomInRange
 } from "../utils/chatRoomEngine";
 import HourlyBottleneckHeatmap from "./HourlyBottleneckHeatmap";
 import ChannelTrendChart from "./ChannelTrendChart";
@@ -91,7 +91,7 @@ function AccordionSection({
 export default function ChatResponseTab() {
   const {
     chatRooms, importChatRooms, problemForms, orderItems, companyHolidays, setCompanyHolidays,
-    monthlyCsLaborCostAllocation, setMonthlyCsLaborCostAllocation, isSyncing
+    monthlyCsLaborCostAllocation, setMonthlyCsLaborCostAllocation, isSyncing, weekFilter, weekRanges
   } = useReviews();
 
   const [showCSVModal, setShowCSVModal] = useState(false);
@@ -150,21 +150,38 @@ export default function ChatResponseTab() {
 
   // 인바운드 부재중 → 같은 고객의 아웃바운드 성공 콜백 재분류(reconcileCallbacks)를 가장 먼저 적용하고,
   // 이후 모든 지표는 이 보정된 목록을 기준으로 계산한다 — 그래야 응대율/부재중율/총문의량이 전부 일관된다.
-  const { rooms: reconciledRooms, reconciledCount } = useMemo(() => reconcileCallbacks(chatRooms), [chatRooms]);
+  // 재분류는 전체 기간 데이터로 먼저 수행한다 — 인바운드 부재중과 그에 대한 아웃바운드 콜백이 서로
+  // 다른 주(예: 목요일 부재중 → 다음주 월요일 콜백)에 걸쳐 있을 수 있어, 주차 필터를 먼저 적용하면
+  // 짝을 못 찾고 깨질 수 있기 때문이다.
+  const { rooms: reconciledRoomsAll, reconciledCount } = useMemo(() => reconcileCallbacks(chatRooms), [chatRooms]);
   const holidaySet = useMemo(() => new Set(companyHolidays), [companyHolidays]);
-  const opValidation = useMemo(() => validateOperatingHoursColumn(chatRooms, holidaySet), [chatRooms, holidaySet]);
+
+  // 상단 요약 통계(응대율/FRT/RT/총문의량 등)와 시간대별 히트맵은 "지금 보고 있는 기간"을 나타내는
+  // 스냅샷이므로 전역 주차 필터(이번주/저번주/전체기간)를 따른다. 반면 일별/월별 추이 차트
+  // (channelTrend/frtArtTrend/channelMixTrend/cpo/forecastTrend)는 원래도 자체적으로 긴 기간을
+  // 그리는 게 목적이라 주차 필터와 무관하게 전체 이력을 그대로 쓴다.
+  const weekRange = useMemo(
+    () => weekFilter === "this" ? weekRanges.thisWeek : weekFilter === "last" ? weekRanges.lastWeek : weekRanges.allPeriod,
+    [weekFilter, weekRanges]
+  );
+  const reconciledRooms = useMemo(
+    () => reconciledRoomsAll.filter(r => isChatRoomInRange(r, weekRange)),
+    [reconciledRoomsAll, weekRange]
+  );
+  const chatRoomsInRange = useMemo(() => chatRooms.filter(r => isChatRoomInRange(r, weekRange)), [chatRooms, weekRange]);
+  const opValidation = useMemo(() => validateOperatingHoursColumn(chatRoomsInRange, holidaySet), [chatRoomsInRange, holidaySet]);
 
   const summary = useMemo(() => computeChatRoomSummary(reconciledRooms, holidaySet), [reconciledRooms, holidaySet]);
   const hourlyBottleneck = useMemo(() => computeHourlyBottleneck(reconciledRooms, holidaySet), [reconciledRooms, holidaySet]);
-  const channelTrend = useMemo(() => computeChannelTrendByDay(reconciledRooms), [reconciledRooms]);
-  const frtArtTrend = useMemo(() => computeFrtArtTrend(reconciledRooms, holidaySet), [reconciledRooms, holidaySet]);
-  const channelMixTrend = useMemo(() => computeChannelMixTrendByMonth(reconciledRooms, problemForms, orderItems), [reconciledRooms, problemForms, orderItems]);
+  const channelTrend = useMemo(() => computeChannelTrendByDay(reconciledRoomsAll), [reconciledRoomsAll]);
+  const frtArtTrend = useMemo(() => computeFrtArtTrend(reconciledRoomsAll, holidaySet), [reconciledRoomsAll, holidaySet]);
+  const channelMixTrend = useMemo(() => computeChannelMixTrendByMonth(reconciledRoomsAll, problemForms, orderItems), [reconciledRoomsAll, problemForms, orderItems]);
   const latestMonth = channelMixTrend.length > 0 ? channelMixTrend[channelMixTrend.length - 1].month : undefined;
-  const cpo = useMemo(() => computeChannelMixAndCPO(reconciledRooms, problemForms, orderItems, latestMonth), [reconciledRooms, problemForms, orderItems, latestMonth]);
+  const cpo = useMemo(() => computeChannelMixAndCPO(reconciledRoomsAll, problemForms, orderItems, latestMonth), [reconciledRoomsAll, problemForms, orderItems, latestMonth]);
 
   const forecastTrend = useMemo(
-    () => compute2026ForecastTrendByMonth(reconciledRooms, problemForms, orderItems, monthlyCsLaborCostAllocation),
-    [reconciledRooms, problemForms, orderItems, monthlyCsLaborCostAllocation]
+    () => compute2026ForecastTrendByMonth(reconciledRoomsAll, problemForms, orderItems, monthlyCsLaborCostAllocation),
+    [reconciledRoomsAll, problemForms, orderItems, monthlyCsLaborCostAllocation]
   );
 
   const chatPct = summary.channelMix.find(c => c.label === "채팅")?.pct || 0;
