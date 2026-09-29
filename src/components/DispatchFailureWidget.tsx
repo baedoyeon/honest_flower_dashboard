@@ -299,6 +299,18 @@ export default function DispatchFailureWidget() {
                     </div>
                   )}
 
+                  {parsedResult.futurePeriodCount > 0 && (
+                    <div className="rounded-xl border border-amber-300 bg-amber-50 p-3.5 flex items-start gap-2.5">
+                      <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+                      <p className="text-xs text-amber-900 leading-relaxed">
+                        <span className="font-bold">
+                          오늘({granularity === "weekly" ? "이번 주" : "이번 달"}) 이후의 미래 {granularity === "weekly" ? "주차" : "월"}가 찍힌 행 {parsedResult.futurePeriodCount}건은 제외했습니다.
+                        </span>{" "}
+                        디비버 쿼리의 날짜 조건이나 붙여넣은 파일이 맞는지 확인해주세요.
+                      </p>
+                    </div>
+                  )}
+
                   <div className="flex items-center justify-between pt-2">
                     <button onClick={() => setParsedResult(null)} className="text-xs text-slate-400 hover:text-slate-600 font-bold px-3 py-2 rounded-xl transition cursor-pointer">취소</button>
                     <button

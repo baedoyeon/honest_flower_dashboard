@@ -1593,13 +1593,32 @@ export interface DispatchFailureParseResult {
   missingCriticalColumns: string[];
   isLikelyWrongFileType: boolean;
   detectedColumns: string[];
+  futurePeriodCount: number; // 오늘 기준으로 아직 오지 않은 주/월이 찍힌 채 걸러진 행 수(0이면 정상)
 }
 
-export function parseCSVToDispatchFailure(csvText: string, granularity: "weekly" | "monthly"): DispatchFailureParseResult {
+// 오늘 날짜 기준 "IYYY-IW"(ISO 연-주차) 라벨 — Postgres의 TO_CHAR(date,'IYYY-IW')와 동일한 정의(목요일이
+// 속한 주로 연도를 판정하는 ISO 8601 규칙).
+function currentIsoWeekLabel(today: Date): string {
+  const d = new Date(Date.UTC(today.getFullYear(), today.getMonth(), today.getDate()));
+  const dayNum = (d.getUTCDay() + 6) % 7; // 월=0 ... 일=6
+  d.setUTCDate(d.getUTCDate() - dayNum + 3); // 그 주의 목요일로 이동
+  const isoYear = d.getUTCFullYear();
+  const firstThursday = new Date(Date.UTC(isoYear, 0, 4));
+  const firstThursdayDayNum = (firstThursday.getUTCDay() + 6) % 7;
+  firstThursday.setUTCDate(firstThursday.getUTCDate() - firstThursdayDayNum + 3);
+  const weekNum = 1 + Math.round((d.getTime() - firstThursday.getTime()) / (7 * 24 * 3600 * 1000));
+  return `${isoYear}-${String(weekNum).padStart(2, "0")}`;
+}
+
+function currentYearMonthLabel(today: Date): string {
+  return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
+}
+
+export function parseCSVToDispatchFailure(csvText: string, granularity: "weekly" | "monthly", today: Date = new Date()): DispatchFailureParseResult {
   const rawRows = parseCSVRows(csvText);
 
   if (rawRows.length === 0) {
-    return { rows: [], totalRows: 0, validCount: 0, missingCriticalColumns: [], isLikelyWrongFileType: false, detectedColumns: [] };
+    return { rows: [], totalRows: 0, validCount: 0, missingCriticalColumns: [], isLikelyWrongFileType: false, detectedColumns: [], futurePeriodCount: 0 };
   }
 
   const headerRow = rawRows[0].map(h => h.trim().toLowerCase());
@@ -1646,15 +1665,24 @@ export function parseCSVToDispatchFailure(csvText: string, granularity: "weekly"
     rows.push({ period, totalQty, dispatchFailedQty, dispatchFailureRate });
   });
 
-  rows.sort((a, b) => a.period.localeCompare(b.period));
+  // 디비버에서 손으로 붙여넣는 방식이라 검증 장치가 전혀 없었음 — 오타/잘못된 파일 붙여넣기로
+  // "아직 오지 않은" 주/월이 섞여 들어오면 "최근 주" 카드가 미래 값을 그대로 보여주는 사고가
+  // 있었다(실측 확인, 2026-42). 오늘 기준 아직 안 온 period는 신뢰할 수 없는 값이므로 조용히
+  // 버리고 개수만 남겨 화면에 경고할 수 있게 한다.
+  const currentPeriodLabel = granularity === "weekly" ? currentIsoWeekLabel(today) : currentYearMonthLabel(today);
+  const futureRows = rows.filter(r => r.period > currentPeriodLabel);
+  const validRows = rows.filter(r => r.period <= currentPeriodLabel);
+
+  validRows.sort((a, b) => a.period.localeCompare(b.period));
 
   return {
-    rows,
+    rows: validRows,
     totalRows: dataRows.length,
-    validCount: rows.length,
+    validCount: validRows.length,
     missingCriticalColumns,
     isLikelyWrongFileType,
-    detectedColumns
+    detectedColumns,
+    futurePeriodCount: futureRows.length
   };
 }
 
