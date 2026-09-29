@@ -167,7 +167,7 @@ export default function ReviewArchiveTab() {
   };
 
   // Constants
-  const categories = ["전체", "품질/상태", "배송/포장", "상품구성/양", "서비스/시스템"];
+  const categories = ["전체", "품질/상태", "배송/포장", "상품구성/양", "서비스/시스템", "UXUI"];
 
   // Popular products list for dropdown auto-select
   const popularProducts = [
@@ -451,7 +451,7 @@ export default function ReviewArchiveTab() {
 
     filteredAndSortedReviews.forEach(r => {
       const resolvedReviewer = r.reviewer || `고객#${r.id}`;
-      const resolvedDept = r.category === "상품구성/양" ? "MD" : r.category === "서비스/시스템" ? "프로덕트" : r.department;
+      const resolvedDept = r.category === "상품구성/양" ? "MD" : r.category === "서비스/시스템" ? "프로덕트" : r.category === "UXUI" ? "개발, 프로덕트" : r.department;
       
       const row = [
         escapeCSV(r.id),
@@ -506,6 +506,7 @@ export default function ReviewArchiveTab() {
       if (newCategory === "배송/포장") department = "SCM & CS";
       else if (newCategory === "상품구성/양") department = "MD";
       else if (newCategory === "서비스/시스템") department = "프로덕트";
+      else if (newCategory === "UXUI") department = "개발, 프로덕트";
 
       // Get current date formatted in YYYY.MM.DD
       const now = new Date();
@@ -1270,6 +1271,7 @@ Content-Type: application/json
                     <option value="배송/포장">배송/포장 (담당: SCM & CS)</option>
                     <option value="상품구성/양">상품구성/양 (담당: MD)</option>
                     <option value="서비스/시스템">서비스/시스템 (담당: 프로덕트)</option>
+                    <option value="UXUI">UXUI (담당: 개발, 프로덕트)</option>
                   </select>
                 </div>
               </div>
@@ -1695,7 +1697,7 @@ Content-Type: application/json
                     typeIcon = <AlertOctagon className="h-3 w-3 text-red-600" />;
                   }
 
-                  const dept = item.category === "상품구성/양" ? "MD" : item.category === "서비스/시스템" ? "프로덕트" : item.department;
+                  const dept = item.category === "상품구성/양" ? "MD" : item.category === "서비스/시스템" ? "프로덕트" : item.category === "UXUI" ? "개발, 프로덕트" : item.department;
 
                   return (
                     <React.Fragment key={item.id}>
@@ -1956,7 +1958,7 @@ Content-Type: application/json
                 typeIcon = <AlertOctagon className="h-3 w-3 text-red-600" />;
               }
 
-              const dept = item.category === "상품구성/양" ? "MD" : item.category === "서비스/시스템" ? "프로덕트" : item.department;
+              const dept = item.category === "상품구성/양" ? "MD" : item.category === "서비스/시스템" ? "프로덕트" : item.category === "UXUI" ? "개발, 프로덕트" : item.department;
 
               return (
                 <div

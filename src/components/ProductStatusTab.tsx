@@ -199,6 +199,7 @@ export default function ProductStatusTab() {
           if (topCat === "품질/상태") issues.push("꽃 컨디션 저하");
           else if (topCat === "배송/포장") issues.push("배송 중 컨디션 훼손");
           else if (topCat === "상품구성/양") issues.push("구성품 부족 및 누락");
+          else if (topCat === "UXUI") issues.push("웹/앱 사용성 불편");
           else issues.push("서비스 만족도 아쉬움");
         }
       }

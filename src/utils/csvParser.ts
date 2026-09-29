@@ -52,7 +52,7 @@ export function normalizeDateStr(d: any): string {
 export function classifyCategory(reviewText: string, rating: number, rawCategory?: string): string {
   if (rawCategory && rawCategory.trim()) {
     const trimmed = rawCategory.trim();
-    if (["품질/상태", "배송/포장", "상품구성/양", "서비스/시스템"].includes(trimmed)) {
+    if (["품질/상태", "배송/포장", "상품구성/양", "서비스/시스템", "UXUI"].includes(trimmed)) {
       return trimmed;
     }
     // Simple keyword mapping for rough category inputs
@@ -60,6 +60,7 @@ export function classifyCategory(reviewText: string, rating: number, rawCategory
     if (trimmed.includes("배송") || trimmed.includes("포장") || trimmed.includes("택배")) return "배송/포장";
     if (trimmed.includes("구성") || trimmed.includes("양") || trimmed.includes("수량")) return "상품구성/양";
     if (trimmed.includes("서비스") || trimmed.includes("시스템") || trimmed.includes("앱")) return "서비스/시스템";
+    if (trimmed.includes("UI") || trimmed.includes("UX") || trimmed.includes("디자인") || trimmed.includes("화면")) return "UXUI";
   }
 
   const text = (reviewText || "").toLowerCase();
@@ -115,7 +116,23 @@ export function classifyCategory(reviewText: string, rating: number, rawCategory
     return "서비스/시스템";
   }
 
-  // 4. Default -> 품질/상태
+  // 4. UXUI keywords (홈페이지/앱의 시각 디자인·사용성 불편 — 기능 오류가 아니라 화면/조작감 자체에 대한 언급)
+  if (
+    text.includes("화면") ||
+    text.includes("디자인") ||
+    text.includes("버튼") ||
+    text.includes("레이아웃") ||
+    text.includes("폰트") ||
+    text.includes("글씨") ||
+    text.includes("가독성") ||
+    text.includes("인터페이스") ||
+    text.includes("ui") ||
+    text.includes("ux")
+  ) {
+    return "UXUI";
+  }
+
+  // 5. Default -> 품질/상태
   return "품질/상태";
 }
 
@@ -124,15 +141,17 @@ export function getDepartmentForCategory(category: string, rawDept?: string): st
   if (rawDept && rawDept.trim()) return rawDept.trim();
   switch (category) {
     case "품질/상태":
-      return "SCM & MD";
+      return "플로, MD";
     case "배송/포장":
-      return "SCM & CS";
+      return "운영, 패킹";
     case "상품구성/양":
       return "MD";
     case "서비스/시스템":
-      return "프로덕트";
+      return "개발, CX";
+    case "UXUI":
+      return "개발, 프로덕트";
     default:
-      return "SCM & MD";
+      return "운영 & MD";
   }
 }
 

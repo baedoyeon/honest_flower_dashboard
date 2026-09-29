@@ -15,12 +15,13 @@ export default function VOCAnaTab() {
 
   // 1. Dynamic aggregation of categories and their ratings
   const categoryStats = useMemo(() => {
-    const categories = ["품질/상태", "배송/포장", "상품구성/양", "서비스/시스템"];
+    const categories = ["품질/상태", "배송/포장", "상품구성/양", "서비스/시스템", "UXUI"];
     const agg: Record<string, { recommend: number; neutral: number; notRecommend: number; department: string }> = {
       "품질/상태": { recommend: 0, neutral: 0, notRecommend: 0, department: "SCM & MD" },
       "배송/포장": { recommend: 0, neutral: 0, notRecommend: 0, department: "SCM & CS" },
       "상품구성/양": { recommend: 0, neutral: 0, notRecommend: 0, department: "MD" },
       "서비스/시스템": { recommend: 0, neutral: 0, notRecommend: 0, department: "프로덕트" },
+      "UXUI": { recommend: 0, neutral: 0, notRecommend: 0, department: "개발, 프로덕트" },
     };
 
     reviewsData.forEach(r => {
@@ -46,10 +47,10 @@ export default function VOCAnaTab() {
   // 중 피드백 텍스트가 채워진 비율이 낮으므로(약 19%), 텍스트 없는 응답은 억지로 카테고리에 넣지 않고
   // "사유 미기재"로 별도 카운트만 남긴다 — 채움률 자체를 화면에 명시하는 게 스펙 요건이다.
   const detractorCategoryStats = useMemo(() => {
-    const categories = ["품질/상태", "배송/포장", "상품구성/양", "서비스/시스템"] as const;
-    const counts: Record<string, number> = { "품질/상태": 0, "배송/포장": 0, "상품구성/양": 0, "서비스/시스템": 0 };
-    const revenue: Record<string, number> = { "품질/상태": 0, "배송/포장": 0, "상품구성/양": 0, "서비스/시스템": 0 };
-    const samples: Record<string, string[]> = { "품질/상태": [], "배송/포장": [], "상품구성/양": [], "서비스/시스템": [] };
+    const categories = ["품질/상태", "배송/포장", "상품구성/양", "서비스/시스템", "UXUI"] as const;
+    const counts: Record<string, number> = { "품질/상태": 0, "배송/포장": 0, "상품구성/양": 0, "서비스/시스템": 0, "UXUI": 0 };
+    const revenue: Record<string, number> = { "품질/상태": 0, "배송/포장": 0, "상품구성/양": 0, "서비스/시스템": 0, "UXUI": 0 };
+    const samples: Record<string, string[]> = { "품질/상태": [], "배송/포장": [], "상품구성/양": [], "서비스/시스템": [], "UXUI": [] };
 
     // 이탈위험 매출액 — 피드백 유무와 무관하게 Detractor 전체의 구매비용 합. "몇 명이냐"가 아니라
     // "얼마가 걸려있냐"로 보여줘서 카테고리별 우선순위 판단의 근거로 쓴다(사용자 요청).
@@ -103,7 +104,7 @@ export default function VOCAnaTab() {
   // 단골한테 몰려있나"를 보려는 것. 피드백 텍스트가 있는 Detractor(전체의 약 19%)만 분류 가능하므로
   // 표본이 작다 — 비율(%)이 아니라 원 건수를 그대로 보여줘서 착시를 만들지 않는다.
   const categoryTierCrosstab = useMemo(() => {
-    const categories = ["품질/상태", "배송/포장", "상품구성/양", "서비스/시스템"] as const;
+    const categories = ["품질/상태", "배송/포장", "상품구성/양", "서비스/시스템", "UXUI"] as const;
     const tiers = NPS_PURCHASE_TIERS.map(t => t.label);
     const grid: Record<string, Record<string, number>> = {};
     categories.forEach(c => { grid[c] = {}; tiers.forEach(t => { grid[c][t] = 0; }); });
