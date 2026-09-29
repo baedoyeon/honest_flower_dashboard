@@ -9,23 +9,30 @@ function formatWon(n: number): string {
   return `${n.toLocaleString()}원`;
 }
 
+// classifyCategory는 UXUI(화면/디자인/버튼 등 UI 불만)를 5번째 카테고리로 반환할 수 있지만, 이
+// 탭의 부서 매핑/집계는 기존 4대 분류(품질/상태·배송/포장·상품구성/양·서비스/시스템) 체계를 그대로
+// 유지하기로 결정됨(사용자 확인) — UXUI는 서비스/시스템(개발 담당)으로 접어서 표시한다.
+function foldUxuiIntoService(category: string): string {
+  return category === "UXUI" ? "서비스/시스템" : category;
+}
+
 export default function VOCAnaTab() {
   const { weeklyReviews: reviewsData, npsDetractorRows, npsPurchaseTierStats, setActiveTab } = useReviews();
   const [activeGuideTab, setActiveGuideTab] = useState<"categories" | "judgment" | "patterns">("categories");
 
   // 1. Dynamic aggregation of categories and their ratings
   const categoryStats = useMemo(() => {
-    const categories = ["품질/상태", "배송/포장", "상품구성/양", "서비스/시스템", "UXUI"];
+    const categories = ["품질/상태", "배송/포장", "상품구성/양", "서비스/시스템"];
     const agg: Record<string, { recommend: number; neutral: number; notRecommend: number; department: string }> = {
       "품질/상태": { recommend: 0, neutral: 0, notRecommend: 0, department: "SCM & MD" },
       "배송/포장": { recommend: 0, neutral: 0, notRecommend: 0, department: "SCM & CS" },
       "상품구성/양": { recommend: 0, neutral: 0, notRecommend: 0, department: "MD" },
       "서비스/시스템": { recommend: 0, neutral: 0, notRecommend: 0, department: "프로덕트" },
-      "UXUI": { recommend: 0, neutral: 0, notRecommend: 0, department: "개발, 프로덕트" },
     };
 
     reviewsData.forEach(r => {
-      const cat = agg[r.category] ? r.category : "품질/상태";
+      const folded = foldUxuiIntoService(r.category);
+      const cat = agg[folded] ? folded : "품질/상태";
       if (r.type === "추천") agg[cat].recommend++;
       else if (r.type === "중립") agg[cat].neutral++;
       else agg[cat].notRecommend++;
@@ -47,10 +54,10 @@ export default function VOCAnaTab() {
   // 중 피드백 텍스트가 채워진 비율이 낮으므로(약 19%), 텍스트 없는 응답은 억지로 카테고리에 넣지 않고
   // "사유 미기재"로 별도 카운트만 남긴다 — 채움률 자체를 화면에 명시하는 게 스펙 요건이다.
   const detractorCategoryStats = useMemo(() => {
-    const categories = ["품질/상태", "배송/포장", "상품구성/양", "서비스/시스템", "UXUI"] as const;
-    const counts: Record<string, number> = { "품질/상태": 0, "배송/포장": 0, "상품구성/양": 0, "서비스/시스템": 0, "UXUI": 0 };
-    const revenue: Record<string, number> = { "품질/상태": 0, "배송/포장": 0, "상품구성/양": 0, "서비스/시스템": 0, "UXUI": 0 };
-    const samples: Record<string, string[]> = { "품질/상태": [], "배송/포장": [], "상품구성/양": [], "서비스/시스템": [], "UXUI": [] };
+    const categories = ["품질/상태", "배송/포장", "상품구성/양", "서비스/시스템"] as const;
+    const counts: Record<string, number> = { "품질/상태": 0, "배송/포장": 0, "상품구성/양": 0, "서비스/시스템": 0 };
+    const revenue: Record<string, number> = { "품질/상태": 0, "배송/포장": 0, "상품구성/양": 0, "서비스/시스템": 0 };
+    const samples: Record<string, string[]> = { "품질/상태": [], "배송/포장": [], "상품구성/양": [], "서비스/시스템": [] };
 
     // 이탈위험 매출액 — 피드백 유무와 무관하게 Detractor 전체의 구매비용 합. "몇 명이냐"가 아니라
     // "얼마가 걸려있냐"로 보여줘서 카테고리별 우선순위 판단의 근거로 쓴다(사용자 요청).
@@ -64,7 +71,7 @@ export default function VOCAnaTab() {
         return;
       }
       withFeedback++;
-      const cat = classifyCategory(r.feedback, 0, undefined);
+      const cat = foldUxuiIntoService(classifyCategory(r.feedback, 0, undefined));
       const key = categories.includes(cat as any) ? cat : "품질/상태";
       counts[key]++;
       revenue[key] += r.totalPurchaseAmount || 0;
@@ -104,7 +111,7 @@ export default function VOCAnaTab() {
   // 단골한테 몰려있나"를 보려는 것. 피드백 텍스트가 있는 Detractor(전체의 약 19%)만 분류 가능하므로
   // 표본이 작다 — 비율(%)이 아니라 원 건수를 그대로 보여줘서 착시를 만들지 않는다.
   const categoryTierCrosstab = useMemo(() => {
-    const categories = ["품질/상태", "배송/포장", "상품구성/양", "서비스/시스템", "UXUI"] as const;
+    const categories = ["품질/상태", "배송/포장", "상품구성/양", "서비스/시스템"] as const;
     const tiers = NPS_PURCHASE_TIERS.map(t => t.label);
     const grid: Record<string, Record<string, number>> = {};
     categories.forEach(c => { grid[c] = {}; tiers.forEach(t => { grid[c][t] = 0; }); });
@@ -114,7 +121,7 @@ export default function VOCAnaTab() {
     npsDetractorRows.forEach(r => {
       if (!r.feedback) return;
       totalWithFeedback++;
-      const cat = classifyCategory(r.feedback, 0, undefined);
+      const cat = foldUxuiIntoService(classifyCategory(r.feedback, 0, undefined));
       const key = categories.includes(cat as any) ? cat : "품질/상태";
       const tier = purchaseTierLabel(r.purchaseCount);
       grid[key][tier]++;
@@ -132,9 +139,12 @@ export default function VOCAnaTab() {
   }, [categoryStats]);
 
   // 3. Find 3 actual critical reviews for each of the top concern categories
+  // categoryStats와 반드시 같은 기준으로 걸러야 한다 — UXUI를 서비스/시스템으로 접어서 집계했는데
+  // 여기서 원본 카테고리로 그대로 비교하면, "비추천 N건"(집계)과 "존재하지 않음"(원본 매칭 0건)이
+  // 동시에 뜨는 모순이 생긴다.
   const getCriticalQuotes = (category: string) => {
     return reviewsData
-      .filter(r => r.category === category && r.type === "비추천")
+      .filter(r => foldUxuiIntoService(r.category) === category && r.type === "비추천")
       .slice(0, 3);
   };
 
