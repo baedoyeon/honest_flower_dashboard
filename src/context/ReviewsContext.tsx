@@ -256,6 +256,13 @@ export function getDeduplicatedIncidents(list: Incident[]): Incident[] {
 
   list.forEach(item => {
     const existingIndex = incidents.findIndex(existing => {
+      // 0. 어니스트플라워(일반)와 플라워고는 완전히 별개 채널이라 서로 중복일 수 없다 — 두 시스템이
+      // 각자 독립적으로 번호를 매기므로(예: 플라워고 "FG9668" vs 일반 "9668"), 숫자만 남기는 ID
+      // 비교가 채널이 다른데도 우연히 일치해 잘못 합쳐지는 걸 막는다.
+      if ((existing.importChannel || "일반") !== (item.importChannel || "일반")) {
+        return false;
+      }
+
       // 1. Match by exact incident ID or numeric ID (e.g. INC-9301 vs 9301)
       if (existing.id && item.id) {
         const exNum = existing.id.replace(/\D/g, "");
