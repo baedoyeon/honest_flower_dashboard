@@ -178,6 +178,22 @@ function buildProblemFormsByOrderNumber(problemForms: ProblemForm[]): Map<string
   return map;
 }
 
+// orderNumber만으로 매칭하면 안 된다 — 실측 확인 결과 9월 주문의 45.2%(275/608건)가 한 주문에 상품
+// 2종 이상을 담고 있어서, orderNumber 하나에 연결된 ProblemForm을 그 주문의 모든 상품에 그대로 다
+// 붙이면(예전 동작) 사고와 무관한 동봉상품(쇼핑백/침봉 등)까지 클레임으로 잡히고 환불액도 중복
+// 합산된다(재현 테스트로 확정: 장미 5,000원 환불 사고가 같은 주문의 쇼핑백에도 그대로 복제돼 월간
+// 합계가 10,000원으로 2배 집계됨). ProblemForm.productName(정규화됨, 플라워고는 노출명->소분류
+// 매핑 경유)이 이 OrderItem 자신의 상품(마찬가지로 "/" 앞부분 정규화)과 실제로 일치하는 것만
+// 돌려준다. 일반 채널은 SKU가 자사몰<->어드민 간 일관되게 적용돼 이 매칭이 거의 실패하지 않는 것으로
+// 확인됨(사용자 확인) — 매칭 실패 시 그 ProblemForm은 어느 상품에도 귀속되지 않는다(별도 안전장치
+// 불필요하다고 확정됨).
+function getOwnProblemForms(item: OrderItem, problemFormsByOrderNumber: Map<string, ProblemForm[]>): ProblemForm[] {
+  const all = problemFormsByOrderNumber.get(item.orderNumber) || [];
+  const itemProduct = (item.product || "").split("/")[0].trim();
+  if (!itemProduct) return [];
+  return all.filter(p => normalizeProblemFormProduct(p) === itemProduct);
+}
+
 function buildReshipsByGroup(reshipOrders: OrderItem[]): Map<string, OrderItem[]> {
   const map = new Map<string, OrderItem[]>();
   reshipOrders.forEach(r => {
@@ -248,7 +264,7 @@ export function computeMonthlyStats(orderItems: OrderItem[], problemForms: Probl
     let refundAmountTotal = 0;
     orders.forEach(o => {
       const groupReships = (o.groupOrderNumber && reshipsByGroup.get(o.groupOrderNumber)) || [];
-      const ownPf = problemFormsByOrderNumber.get(o.orderNumber) || [];
+      const ownPf = getOwnProblemForms(o, problemFormsByOrderNumber);
       const { isClaim, refundAmount } = resolveItemClaim(o, ownPf, hasProblemFormData, groupReships);
       if (isClaim) { claimCount++; refundAmountTotal += refundAmount; }
     });
@@ -329,7 +345,7 @@ export function computeDailyTrend(orderItems: OrderItem[], problemForms: Problem
     let refund = 0;
     dayOrders.forEach(o => {
       const groupReships = (o.groupOrderNumber && reshipsByGroup.get(o.groupOrderNumber)) || [];
-      const ownPf = problemFormsByOrderNumber.get(o.orderNumber) || [];
+      const ownPf = getOwnProblemForms(o, problemFormsByOrderNumber);
       const { isClaim, refundAmount } = resolveItemClaim(o, ownPf, hasProblemFormData, groupReships);
       if (isClaim) { claimCount++; refund += refundAmount; }
     });
@@ -421,7 +437,7 @@ export function computeProductClaimStats(orderItems: OrderItem[], problemForms: 
     const targets = new Set<string>();
     if (hasProblemFormData) {
       items.forEach(item => {
-        const ownPf = problemFormsByOrderNumber.get(item.orderNumber) || [];
+        const ownPf = getOwnProblemForms(item, problemFormsByOrderNumber);
         const reshipHandled = ownPf.some(p => p.handlingMethod === "재발송");
         const productReshipped = groupReships.some(r => r.product === item.product);
         if (reshipHandled || productReshipped) targets.add(item.product);
@@ -448,7 +464,7 @@ export function computeProductClaimStats(orderItems: OrderItem[], problemForms: 
     };
     entry.orderCount++;
     const groupReships = (o.groupOrderNumber && reshipsByGroup.get(o.groupOrderNumber)) || [];
-    const ownPf = problemFormsByOrderNumber.get(o.orderNumber) || [];
+    const ownPf = getOwnProblemForms(o, problemFormsByOrderNumber);
     const { isClaim, refundAmount } = resolveItemClaim(o, ownPf, hasProblemFormData, groupReships);
     if (isClaim) {
       entry.claimCount++;
