@@ -237,11 +237,15 @@ export function reconcileCallbacks(chatRooms: ChatRoom[]): { rooms: ChatRoom[]; 
 }
 
 export interface ChatRoomSummary {
-  totalInquiries: number; // 챗+콜 (Part B 정의 — 사고접수/플라워고는 Part C의 별도 total에서 합산)
+  totalInquiries: number; // 챗(봇 전용 세션 포함)+콜 — 실제 유입량 전체(Part B 정의)
   chatCount: number;
   callCount: number;
-  answeredCount: number;
-  responseRatePct: number; // 0~100
+  botHandledCount: number; // userChatStatus==="chatbot"로 매니저 개입 없이 봇이 끝낸 채팅 건수
+  botHandledRatePct: number; // botHandledCount / totalInquiries × 100
+  humanInquiries: number; // "휴먼 응대율"의 분모 — 챗(봇 전용 제외)+콜. 실측 결과 봇 세션엔 매니저 응답
+  // 모순이 0건이라(검증 완료), 이 필드 하나만으로 걸러도 안전하다고 확인됨.
+  answeredCount: number; // humanInquiries 중 실제 매니저가 응대한 건수
+  responseRatePct: number; // "휴먼 응대율" = answeredCount / humanInquiries × 100, 0~100
   avgFrtMinutes?: number; // First Response Time, 채팅 전용
   medianFrtMinutes?: number; // 소수의 장기 미응답 건이 평균을 크게 끌어올리는 우측 꼬리 분포라 평균만으론 오해 소지 있음 — 대표값으로 병기
   frtSampleSize: number;
@@ -259,14 +263,24 @@ export function computeChatRoomSummary(chatRooms: ChatRoom[], holidays: HolidayS
   const chatRows = chatRooms.filter(r => r.category === "채팅");
   const phoneRows = chatRooms.filter(r => isPhoneCategory(r.category));
 
-  const chatAnswered = chatRows.filter(r => isChatRoomAnswered(r));
+  // 봇 전용 세션(userChatStatus==="chatbot")은 매니저 응대가 애초에 필요 없었던 건이라 "휴먼 응대율"
+  // 분모/분자 양쪽에서 제외한다 — 실측 확인 결과 봇 세션 중 매니저 응답이 달린 모순 건은 0건이라
+  // 이 필드만으로 걸러도 안전함(active/closed는 과거 6건 모순이 있어 그대로 isChatRoomAnswered 사용).
+  const botChatRows = chatRows.filter(r => r.userChatStatus === "chatbot");
+  const humanChatRows = chatRows.filter(r => r.userChatStatus !== "chatbot");
+
+  const chatAnswered = humanChatRows.filter(r => isChatRoomAnswered(r));
   const phoneAnswered = phoneRows.filter(r => isChatRoomAnswered(r));
   // 콜백으로 재분류된 건은 더 이상 "부재중"이 아니므로 부재중 집계(분모/분자 모두)에서 제외한다.
   const phoneMissed = phoneRows.filter(r => r.phoneStatus === "부재중" && !r.reconciledAsCallback);
 
   const totalInquiries = chatRows.length + phoneRows.length;
+  const botHandledCount = botChatRows.length;
+  const botHandledRatePct = totalInquiries > 0 ? (botHandledCount / totalInquiries) * 100 : 0;
+
+  const humanInquiries = humanChatRows.length + phoneRows.length;
   const answeredCount = chatAnswered.length + phoneAnswered.length;
-  const responseRatePct = totalInquiries > 0 ? (answeredCount / totalInquiries) * 100 : 0;
+  const responseRatePct = humanInquiries > 0 ? (answeredCount / humanInquiries) * 100 : 0;
 
   // 평균 FRT/RT/ART는 오픈~응답 사이에 실제로 경과한 "영업시간(월~금 10-17시)" 분량만 합산한다
   // (야간/주말 대기시간은 0으로 취급, businessMinutesBetween 참고). 행 전체를 영업시간 안/밖으로
@@ -287,7 +301,7 @@ export function computeChatRoomSummary(chatRooms: ChatRoom[], holidays: HolidayS
   // RT/ART = "매니저 답변 횟수 기준 평균 응대 간격" — 세션의 영업시간 기준 소요시간(오픈~종료)을
   // 그 세션의 매니저 답변 횟수로 나눈 값(세션 내 응답이 균등 간격으로 이뤄진다고 가정한 근사치)의 전체 평균.
   const artSamples: number[] = [];
-  chatRows.forEach(r => {
+  humanChatRows.forEach(r => {
     const open = parseDT(r.chatOpenedAt);
     const closed = parseDT(r.chatClosedAt);
     if (open && closed && closed.getTime() >= open.getTime() && r.managerReplyCount && r.managerReplyCount > 0) {
@@ -318,6 +332,9 @@ export function computeChatRoomSummary(chatRooms: ChatRoom[], holidays: HolidayS
     totalInquiries,
     chatCount: chatRows.length,
     callCount: phoneRows.length,
+    botHandledCount,
+    botHandledRatePct,
+    humanInquiries,
     answeredCount,
     responseRatePct,
     avgFrtMinutes,

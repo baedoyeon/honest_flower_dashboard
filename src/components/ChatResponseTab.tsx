@@ -437,11 +437,18 @@ export default function ChatResponseTab() {
           {/* KPI 카드 — 탭 진입 시 항상 스크롤 없이 바로 보이는 최상단 고정 배치 */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <StatTile
-              label="응대율"
+              label="휴먼 응대율"
               value={`${summary.responseRatePct.toFixed(1)}%`}
-              subtext={`${summary.answeredCount}건 / 전체 ${summary.totalInquiries}건`}
+              subtext={`${summary.answeredCount}건 / 휴먼응대 필요 ${summary.humanInquiries}건 (봇 전용 세션 ${summary.botHandledCount}건 제외)`}
               icon={<Percent className="h-6 w-6" />}
               color="blue"
+            />
+            <StatTile
+              label="봇 처리율"
+              value={`${summary.botHandledRatePct.toFixed(1)}%`}
+              subtext={`${summary.botHandledCount}건 / 전체 ${summary.totalInquiries}건 — 매니저 개입 없이 봇이 종결`}
+              icon={<MessageCircle className="h-6 w-6" />}
+              color="emerald"
             />
             <StatTile
               label="평균 FRT (최초 응답)"
