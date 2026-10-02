@@ -8,7 +8,7 @@ import { CsCostExportRow, DispatchFailureRow, NpsSummary, NpsDetractorRow, NpsTr
 import { defaultCompanyHolidays } from "../data/companyHolidays";
 import { idbLoad, idbSave } from "../utils/idbStorage";
 import { DEFAULT_MONTHLY_CS_LABOR_COST_ALLOCATION_KRW } from "../utils/chatRoomEngine";
-import { ProductMonthAggregate, computeProductMonthAggregates } from "../utils/claimCostEngine";
+import { ProductMonthAggregate, computeProductMonthAggregates, normalizeProblemFormProduct } from "../utils/claimCostEngine";
 
 // 어드민 사고접수 태깅 대분류(품질/출고/배송) + 기타불만 — ProductStatusTab의 "요주의 위크" 카드
 // 배지/브레이크다운 계산에 쓰인다. classifyCategory(리뷰 텍스트 키워드 매칭용, 품질/상태·배송/포장·
@@ -669,7 +669,7 @@ export function ReviewsProvider({ children }: { children: React.ReactNode }) {
     if (problemForms.length > 0) {
       problemForms.forEach(pf => {
         if (!pf.receivedDate || pf.receivedDate < range.start || pf.receivedDate > range.end) return;
-        const base = (pf.productName || "").split("/")[0].trim();
+        const base = normalizeProblemFormProduct(pf);
         if (!base) return;
         counts[base] = (counts[base] || 0) + 1;
       });
@@ -701,7 +701,7 @@ export function ReviewsProvider({ children }: { children: React.ReactNode }) {
     if (problemForms.length > 0) {
       problemForms.forEach(pf => {
         if (!pf.receivedDate || pf.receivedDate < range.start || pf.receivedDate > range.end) return;
-        const base = (pf.productName || "").split("/")[0].trim();
+        const base = normalizeProblemFormProduct(pf);
         if (!base) return;
         push(base, pf.accidentDetail, pf.accidentType);
       });
@@ -783,7 +783,7 @@ export function ReviewsProvider({ children }: { children: React.ReactNode }) {
       list.push({
         key: `incident-${pf.id}`,
         type: "incident",
-        product: (pf.productName || "").split("/")[0].trim() || "(상품명 없음)",
+        product: normalizeProblemFormProduct(pf) || "(상품명 없음)",
         customer: getMaskedName(Number(pf.id.replace(/\D/g, "")) || 0, pf.customerName),
         date: pf.receivedDate || "",
         summary: pf.accidentDetail || pf.accidentType || "사고접수 내용 없음",

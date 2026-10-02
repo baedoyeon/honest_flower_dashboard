@@ -1,6 +1,23 @@
 import { OrderItem } from "../data/orderItems";
 import { ProblemForm } from "../data/problemForms";
 import { CsCostExportRow } from "./csvParser";
+import { FLOWERGO_NAME_TO_CATEGORY } from "../data/flowergoProductCategoryMap";
+
+// ProblemForm.productName을 "기준상품명"으로 정규화한다 — 일반 채널은 "이름/사이즈/색상" 중 앞부분만
+// 자르면 되지만(예: "절화수명연장제/10개입/하양" -> "절화수명연장제"), 플라워고는 그 방식이 안 통한다
+// ("Co 프리덤 장미"처럼 "/"가 아예 없어서 split이 no-op). 대신 플라워고 자체 OrderItem export의
+// "노출명"->"원재료 소분류" 매핑(FLOWERGO_NAME_TO_CATEGORY, 실측 100% 일치 확인됨)으로 치환한다.
+// 매핑에 없는 노출명(신상품 등 아직 맵 생성 이후 추가된 것)은 기존 방식으로 폴백 — 완전히 틀리는
+// 것보다 "조금 덜 정확해도 뭔가는 나오는" 쪽이 안전하다는 판단(사용자 확인: 일반 채널은 SKU 일관성
+// 때문에 이 폴백이 거의 안 걸리지만, 플라워고는 카탈로그가 계속 늘어나 맵이 스냅샷일 수밖에 없음).
+export function normalizeProblemFormProduct(pf: ProblemForm): string {
+  const raw = (pf.productName || "").trim();
+  if (pf.importChannel === "플라워고") {
+    const mapped = FLOWERGO_NAME_TO_CATEGORY[raw];
+    if (mapped) return mapped;
+  }
+  return raw.split("/")[0].trim();
+}
 
 export interface ClaimCostCohort {
   paymentDate: string; // 결제일 (YYYY.MM.DD)
@@ -567,7 +584,7 @@ export function computeItemDailyAccidentPivot(
     if (!p.receivedDate) return;
     const receivedDate = parseDateStr(p.receivedDate);
     if (!receivedDate) return;
-    const product = (p.productName || "").split("/")[0].trim();
+    const product = normalizeProblemFormProduct(p);
     if (!product) return;
 
     const dateStr = formatYmd(receivedDate);
@@ -795,7 +812,7 @@ export function computeProductMonthAggregates(
     if (!p.receivedDate) return;
     const month = monthKeyOf(p.receivedDate);
     if (!month) return;
-    const product = (p.productName || "").split("/")[0].trim();
+    const product = normalizeProblemFormProduct(p);
     if (!product) return;
     const key = `${product}|${month}`;
     accidentMap.set(key, (accidentMap.get(key) || 0) + 1);
@@ -982,7 +999,7 @@ export function computeWeeklyAccidentSpikes(
     if (!p.receivedDate) return;
     const d = parseDateStr(p.receivedDate);
     if (!d || d < windowStart || d > windowEndOfDay) return;
-    const product = (p.productName || "").split("/")[0].trim();
+    const product = normalizeProblemFormProduct(p);
     if (!product) return;
     counts.set(product, (counts.get(product) || 0) + 1);
   });
