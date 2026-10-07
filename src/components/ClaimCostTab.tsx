@@ -8,7 +8,7 @@ import {
   Info, TrendingUp, TrendingDown, ShoppingCart, Receipt, Coins,
   AlertOctagon, PackageSearch, Wallet, Sparkles, Upload, X,
   FileSpreadsheet, CheckCircle2, Loader2, Hourglass, Scale, ChevronDown, ChevronUp, Truck,
-  ListChecks, Search, ArrowUpDown, AlertTriangle, Layers, PieChart
+  ListChecks, Search, ArrowUpDown, AlertTriangle, Layers, PieChart, Calendar
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { useReviews } from "../context/ReviewsContext";
@@ -18,7 +18,7 @@ import {
   parseCSVToCsCostExport, CsCostExportParseResult, parseCSVToIncidents
 } from "../utils/csvParser";
 import {
-  computeMonthlyStats, computeDailyTrend, computeHandlingMethodStats, computeProductClaimStats,
+  computeMonthlyStats, computeDailyTrend, computeHandlingMethodStats, computeProductClaimStats, computeProductClaimStatsByRange,
   computeSalesSkuStats, computeMethodBreakdownByWeek, computeItemDailyAccidentPivot,
   verifyAccidentScopeReflectsRefund, verifyClaimCostAgainstCsExport,
   calcClaimRate, calcClaimCostPerSales, won, MonthlyClaimStat, ProductClaimStat,
@@ -238,6 +238,12 @@ export default function ClaimCostTab() {
   // ------------------------------------------------------------------------
   const [monthRangeCount, setMonthRangeCount] = useState<6 | 8>(8);
 
+  // 상품별 클레임 표를 "이번달" 고정 대신 임의 기간(from~to)으로 직접 조회하고 싶을 때 쓰는 토글 —
+  // ReviewArchiveTab의 "캘린더 범위 지정" 입력(<input type="date">)과 동일한 패턴.
+  const [productTableRangeMode, setProductTableRangeMode] = useState<"thisMonth" | "custom">("thisMonth");
+  const [customRangeStart, setCustomRangeStart] = useState("");
+  const [customRangeEnd, setCustomRangeEnd] = useState("");
+
   const problemFormFlowergoCount = useMemo(
     () => problemForms.filter(p => p.importChannel === "플라워고").length,
     [problemForms]
@@ -279,6 +285,10 @@ export default function ClaimCostTab() {
   const productClaimStatsThisMonth = useMemo(
     () => computeProductClaimStats(orderItems, problemForms, latest?.month),
     [orderItems, problemForms, latest?.month]
+  );
+  const productClaimStatsCustomRange = useMemo(
+    () => (customRangeStart || customRangeEnd) ? computeProductClaimStatsByRange(orderItems, problemForms, customRangeStart, customRangeEnd) : [],
+    [orderItems, problemForms, customRangeStart, customRangeEnd]
   );
   const salesSkuStats = useMemo(
     () => computeSalesSkuStats(orderItems, problemForms, latest?.month),
@@ -681,7 +691,62 @@ export default function ClaimCostTab() {
 
       </div>
 
-      <ProductClaimTable stats={productClaimStatsThisMonth} monthLabel={latest?.label ?? "이번달"} month={latest?.month} />
+      <div className="rounded-3xl border border-slate-200 bg-white p-4 flex flex-col sm:flex-row sm:items-end gap-3">
+        <div className="flex rounded-lg bg-slate-100 p-0.5 border border-slate-200 self-start">
+          <button
+            type="button"
+            onClick={() => setProductTableRangeMode("thisMonth")}
+            className={`px-3 py-1.5 text-[11px] font-bold rounded-md transition cursor-pointer ${
+              productTableRangeMode === "thisMonth" ? "bg-white text-slate-800 shadow-2xs" : "text-slate-500 hover:text-slate-800"
+            }`}
+          >
+            이번달
+          </button>
+          <button
+            type="button"
+            onClick={() => setProductTableRangeMode("custom")}
+            className={`px-3 py-1.5 text-[11px] font-bold rounded-md transition cursor-pointer ${
+              productTableRangeMode === "custom" ? "bg-white text-slate-800 shadow-2xs" : "text-slate-500 hover:text-slate-800"
+            }`}
+          >
+            <Calendar className="h-3 w-3 inline mr-1 -mt-0.5" />
+            기간 직접 설정
+          </button>
+        </div>
+
+        {productTableRangeMode === "custom" && (
+          <div className="flex flex-col sm:flex-row items-end gap-3">
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">시작일</label>
+              <input
+                type="date"
+                value={customRangeStart}
+                onChange={(e) => setCustomRangeStart(e.target.value)}
+                className="text-xs rounded-lg border border-slate-200 bg-white px-3 py-2 focus:outline-hidden focus:ring-1 focus:ring-purple-500 focus:border-purple-500 cursor-pointer text-slate-700"
+              />
+            </div>
+            <div className="text-slate-400 text-xs font-bold pb-2.5 hidden sm:block">~</div>
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">종료일</label>
+              <input
+                type="date"
+                value={customRangeEnd}
+                onChange={(e) => setCustomRangeEnd(e.target.value)}
+                className="text-xs rounded-lg border border-slate-200 bg-white px-3 py-2 focus:outline-hidden focus:ring-1 focus:ring-purple-500 focus:border-purple-500 cursor-pointer text-slate-700"
+              />
+            </div>
+          </div>
+        )}
+      </div>
+
+      {productTableRangeMode === "thisMonth" ? (
+        <ProductClaimTable stats={productClaimStatsThisMonth} monthLabel={latest?.label ?? "이번달"} month={latest?.month} />
+      ) : (
+        <ProductClaimTable
+          stats={productClaimStatsCustomRange}
+          monthLabel={customRangeStart || customRangeEnd ? `${customRangeStart || "처음"} ~ ${customRangeEnd || "지금"}` : "기간 미선택"}
+        />
+      )}
 
       <ItemWeeklyClaimHeatmap rows={itemDailyAccidentPivot.rows} dates={itemDailyAccidentPivot.dates} />
 

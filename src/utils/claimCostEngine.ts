@@ -409,7 +409,24 @@ export function computeHandlingMethodStats(orderItems: OrderItem[], problemForms
 // 조인해 실제 최다 사고유형(mainCause)과 상품별 처리방법 breakdown을 채운다.
 // Top3 위젯은 이 함수를 호출한 뒤 앞에서 3개만 slice해서 쓴다(로직 중복 제거).
 export function computeProductClaimStats(orderItems: OrderItem[], problemForms: ProblemForm[] = [], month?: string): ProductClaimStat[] {
-  const originals = orderItems.filter(o => !o.isReshipCost && (!month || monthKeyOf(o.paymentDate) === month));
+  return computeProductClaimStatsFiltered(orderItems, problemForms, o => !month || monthKeyOf(o.paymentDate) === month);
+}
+
+// computeProductClaimStats와 완전히 동일한 집계 로직을, 월 단위가 아니라 임의의 결제일 범위
+// (from~to, HTML <input type="date"> 형식인 "YYYY-MM-DD")로 스코프를 좁혀서 쓸 때를 위한 버전.
+// paymentDate 자체는 "YYYY.MM.DD"라 비교 전에 구분자를 맞춘다. start/end 둘 다 포함(inclusive).
+export function computeProductClaimStatsByRange(orderItems: OrderItem[], problemForms: ProblemForm[], startDate: string, endDate: string): ProductClaimStat[] {
+  const start = startDate ? startDate.replace(/-/g, ".") : "";
+  const end = endDate ? endDate.replace(/-/g, ".") : "";
+  return computeProductClaimStatsFiltered(orderItems, problemForms, o => {
+    if (start && o.paymentDate < start) return false;
+    if (end && o.paymentDate > end) return false;
+    return true;
+  });
+}
+
+function computeProductClaimStatsFiltered(orderItems: OrderItem[], problemForms: ProblemForm[], dateFilter: (o: OrderItem) => boolean): ProductClaimStat[] {
+  const originals = orderItems.filter(o => !o.isReshipCost && dateFilter(o));
   const reships = orderItems.filter(o => o.isReshipCost);
   const hasProblemFormData = problemForms.length > 0;
   const reshipsByGroup = buildReshipsByGroup(reships);
