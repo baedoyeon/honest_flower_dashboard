@@ -1131,17 +1131,38 @@ export interface ProblemFormParseResult {
   missingCriticalColumns: string[];
   isLikelyWrongFileType: boolean;
   detectedColumns: string[];
+  detectedChannel: "일반" | "플라워고" | null; // 헤더로 감지된 채널 — null이면 감지 불가(수동 선택값 그대로 사용)
+  channelMismatch: boolean; // 감지된 채널과 사용자가 고른 채널(importChannel 인자)이 다름 — 업로드 화면에 경고용
+}
+
+// 일반/플라워고 ProblemForm export는 겉보기 스키마는 비슷해도, 실제 헤더엔 채널별로만 존재하는
+// 컬럼이 있다(실측 확인) — "환불 적립금"은 플라워고 전용, "생산자 정산"/"택배사 정산"/"접수경로"/
+// "주문채널"/"사고접수 이미지"는 일반 전용. 이 중 하나라도 있으면 그 채널로 확정 판정한다(두 신호가
+// 동시에 섞여 나오는 실제 export는 없는 것으로 확인됨). 업로드 시 토글을 깜빡 잘못 선택해도 실제
+// 데이터로 바로잡을 수 있어, 8번 항목(채널 오염)의 실제 발생 경로 중 하나(수동 선택 실수)를 없앤다.
+function detectProblemFormChannel(headerRow: string[]): "일반" | "플라워고" | null {
+  const hasFlowergoOnly = headerRow.some(col => col.includes("환불 적립금") || col.includes("환불적립금"));
+  if (hasFlowergoOnly) return "플라워고";
+  const hasGeneralOnly = headerRow.some(col =>
+    col.includes("생산자 정산") || col.includes("생산자정산") ||
+    col.includes("택배사 정산") || col.includes("택배사정산") ||
+    col.includes("접수경로") || col.includes("주문채널") || col.includes("사고접수 이미지")
+  );
+  if (hasGeneralOnly) return "일반";
+  return null;
 }
 
 // Main ProblemForm(사고접수) CSV Parser Function — 클레임코스트 계산에 필요한 필드만 파싱한다
 // (접수시간/재접수시간/환불시간/반려시간 등 라이프사이클 필드는 Phase 2.3 아카이브 탭에서 다룸).
 // 채널(일반/B2B 등)은 파싱해서 보존하되, Phase 1 계산/화면에서는 채널 구분 없이 통합 처리한다.
 //
-// importChannel: 플라워고 사고접수(`/bloom/problems/problemform/`와 스키마가 거의 동일한 별도
-// 엔드포인트)는 CSV 자체에 채널 구분 컬럼이 없어 업로드 시점에 사용자가 지정한 값을 그대로 태그한다.
-// 컬럼명 차이(그룹주문번호→주문번호 FK, 사고 처리 비율 %→사고 범위 %, 환불 적립금 신규 필드)는
-// 아래 rules에 별칭으로 추가해뒀기 때문에, 어느 채널 CSV든 같은 파서가 자동으로 올바르게 인식한다 —
-// importChannel 파라미터는 오직 결과 태깅용이고 파싱 로직 분기에는 쓰이지 않는다.
+// importChannel: 실측 확인 결과(2026-10) 일반/플라워고 사고접수 export는 겉보기와 달리 헤더가
+// 채널별로 다르다 — "환불 적립금"은 플라워고 전용, "생산자 정산"/"택배사 정산"/"접수경로"/"주문채널"/
+// "사고접수 이미지"는 일반 전용. detectProblemFormChannel()이 이 신호로 채널을 자동 감지해서
+// 실제 태깅에 우선 사용하고(사람이 업로드 토글을 깜빡 잘못 선택해도 데이터로 바로잡힘), 감지가
+// 안 되는 경우(둘 다 없는 미지의 포맷)에만 이 파라미터(사용자가 고른 값)로 폴백한다. 컬럼명 차이
+// (그룹주문번호→주문번호 FK, 사고 처리 비율 %→사고 범위 %)는 아래 rules에 별칭으로 추가해뒀기
+// 때문에, 어느 채널 CSV든 같은 파서가 필드 자체는 올바르게 인식한다.
 export function parseCSVToProblemForms(csvText: string, importChannel: "일반" | "플라워고" = "일반"): ProblemFormParseResult {
   const rawRows = parseCSVRows(csvText);
 
@@ -1153,7 +1174,9 @@ export function parseCSVToProblemForms(csvText: string, importChannel: "일반" 
       totalRefundAmount: 0,
       missingCriticalColumns: [],
       isLikelyWrongFileType: false,
-      detectedColumns: []
+      detectedColumns: [],
+      detectedChannel: null,
+      channelMismatch: false
     };
   }
 
@@ -1194,6 +1217,10 @@ export function parseCSVToProblemForms(csvText: string, importChannel: "일반" 
     // 플라워고 전용 — 적립금 환불액. 현금환불(환불 금액)과는 별개 필드로 보존(합산하지 않음).
     { key: "pointRefundAmount", test: (col) => col.includes("환불 적립금") || col.includes("환불적립금") },
   ];
+
+  const detectedChannel = detectProblemFormChannel(headerRow);
+  const effectiveChannel = detectedChannel ?? importChannel;
+  const channelMismatch = detectedChannel !== null && detectedChannel !== importChannel;
 
   const { indices: pfCols, hasHeader } = detectColumns(headerRow, problemFormColumnRules);
   let colId = pfCols.id;
@@ -1290,7 +1317,7 @@ export function parseCSVToProblemForms(csvText: string, importChannel: "일반" 
       producerSettlement,
       courierSettlement,
       pointRefundAmount,
-      importChannel
+      importChannel: effectiveChannel
     });
   });
 
@@ -1301,7 +1328,9 @@ export function parseCSVToProblemForms(csvText: string, importChannel: "일반" 
     totalRefundAmount,
     missingCriticalColumns,
     isLikelyWrongFileType,
-    detectedColumns
+    detectedColumns,
+    detectedChannel,
+    channelMismatch
   };
 }
 

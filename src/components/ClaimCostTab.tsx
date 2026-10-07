@@ -1520,6 +1520,18 @@ function ClaimCostShell({
                     </div>
                   )}
 
+                  {pfParsedResult.channelMismatch && (
+                    <div className="rounded-xl border border-blue-300 bg-blue-50 p-3.5 flex items-start gap-2.5">
+                      <AlertTriangle className="h-4 w-4 text-blue-600 shrink-0 mt-0.5" />
+                      <p className="text-xs text-blue-900 leading-relaxed">
+                        <span className="font-bold">
+                          위에서 "{pfImportChannel}"을 선택하셨는데, 파일 내용은 "{pfParsedResult.detectedChannel}" 형식으로 보입니다.
+                        </span>{" "}
+                        컬럼 구조(환불 적립금 / 생산자·택배사 정산 등)로 자동 판별해 실제로는 "{pfParsedResult.detectedChannel}"로 반영됩니다 — 토글을 다시 맞추실 필요는 없습니다.
+                      </p>
+                    </div>
+                  )}
+
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                     <div className="rounded-xl bg-white p-3 border border-slate-100">
                       <span className="text-[10px] text-slate-400 font-bold block uppercase">총 건수</span>
