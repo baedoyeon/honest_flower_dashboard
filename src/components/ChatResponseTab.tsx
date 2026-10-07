@@ -439,7 +439,7 @@ export default function ChatResponseTab() {
             <StatTile
               label="휴먼 응대율"
               value={`${summary.responseRatePct.toFixed(1)}%`}
-              subtext={`${summary.answeredCount}건 / 휴먼응대 필요 ${summary.humanInquiries}건 (봇 전용 세션 ${summary.botHandledCount}건 제외)`}
+              subtext={`${summary.answeredCount}건 / 휴먼응대 필요 ${summary.humanInquiries}건 (봇 전용 ${summary.botHandledCount}건, 응대여부 확인불가(active) ${summary.activeUnknownCount}건 제외)`}
               icon={<Percent className="h-6 w-6" />}
               color="blue"
             />
